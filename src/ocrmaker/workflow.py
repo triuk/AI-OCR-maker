@@ -17,6 +17,7 @@ from pathlib import Path
 from . import settings as project_settings
 from .diagnostics import Diagnostics, new_run_id
 from .errors import Conflict, ConfirmationRequired, StepError, StepInterrupted
+from .pages import PAGES_STEP, read_pages
 from .pdf import inspect_source
 from .step import Step, StepContext, StepOutput, StepResult
 from .steps import DEFINITIONS, STEP_IDS, STEPS, StepDefinition, implementations
@@ -173,6 +174,22 @@ class Workflow:
         if result is None or step is None:
             return None
         return step.overlay(result, page)
+
+    def pages(self, project_id: str) -> list[dict]:
+        """The page geometry of every page (see ocrmaker.pages), or [] until Import has finished."""
+        result = self.result(project_id, PAGES_STEP)
+        return read_pages(result) if result else []
+
+    def page_image(self, project_id: str, page: int) -> Path:
+        """The source-view working raster of one page (0-based index), a PNG; KeyError when there is none."""
+        pages = self.pages(project_id)
+        if not 0 <= page < len(pages):
+            raise KeyError("Obraz stránky zatím není k dispozici.")
+        raster = pages[page]["raster"]
+        result = self.result(project_id, raster["step"])
+        if result is None or not result.exists(raster["file"]):
+            raise KeyError("Obraz stránky zatím není k dispozici.")
+        return result.path(raster["file"])
 
     def diagnostics(self, project_id: str, run_id: str | None = None) -> list[dict]:
         self.store.get(project_id)

@@ -201,3 +201,32 @@ def test_diagnostics_list_the_step_records(library, source_pdf):
 
     assert [(r["kind"], r["step"]) for r in records] == [("step_started", "import"), ("step", "import")]
     assert records[1]["outcome"] == "done"
+
+
+def test_imported_pages_and_their_working_rasters_are_served_for_step_previews(client, workflow, source_pdf):
+    project = upload(client, source_pdf).json()
+    base = f"/api/projects/{project['id']}"
+    assert client.get(f"{base}/pages").json() == {"pages": []}
+    assert client.get(f"{base}/pages/0/image").status_code == 404
+
+    client.post(f"{base}/run")
+    workflow.wait(project["id"])
+
+    pages = client.get(f"{base}/pages").json()["pages"]
+    assert [(page["index"], page["width"], page["height"]) for page in pages] == [(0, 595, 842), (1, 595, 842)]
+    image = client.get(f"{base}/pages/1/image")
+    assert (image.status_code, image.headers["content-type"]) == (200, "image/png")
+    assert image.content.startswith(b"\x89PNG")
+    assert client.get(f"{base}/pages/2/image").status_code == 404
+    assert client.get(f"{base}/steps/import/overlay/0").json()["bounds"] == [0, 0, 595, 842]
+    assert client.get(f"/api/projects/{project['id']}/pages/0/image",
+                      headers={"X-Ocrmaker-Token": ""}, params={"token": TOKEN}).status_code == 200
+
+
+def test_the_listing_says_which_steps_have_a_preview_and_the_ui_serves_it(client):
+    listing = client.get("/api/projects").json()
+
+    previews = {step["id"]: step["preview"] for step in listing["steps"]}
+    assert previews["import"] is True and previews["review"] is False
+    assert client.get("/previews/import.js").status_code == 200
+    assert "pageViewer" in client.get("/viewer.js").text

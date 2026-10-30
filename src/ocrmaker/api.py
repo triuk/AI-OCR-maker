@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import settings as project_settings
@@ -70,7 +70,8 @@ def create_api(workflow: Workflow, *, token: str | None = None, control=None) ->
     @app.get("/api/projects")
     def projects():
         return {"projects": workflow.list(),
-                "steps": [{"id": d.id, "label": d.label, "manual": d.manual} for d in STEPS],
+                "steps": [{"id": d.id, "label": d.label, "manual": d.manual,
+                           "preview": (UI / "previews" / f"{d.id}.js").is_file()} for d in STEPS],
                 "choices": project_settings.choices()}
 
     @app.post("/api/projects", status_code=201)
@@ -128,6 +129,15 @@ def create_api(workflow: Workflow, *, token: str | None = None, control=None) ->
         if data is None:
             raise KeyError("Krok pro tuto stránku nemá náhled.")
         return data
+
+    @app.get("/api/projects/{project_id}/pages")
+    def pages(project_id: str):
+        """Page geometry (ocrmaker.pages) every step preview needs; empty until Import has finished."""
+        return {"pages": workflow.pages(project_id)}
+
+    @app.get("/api/projects/{project_id}/pages/{page}/image")
+    def page_image(project_id: str, page: int):
+        return FileResponse(workflow.page_image(project_id, page), media_type="image/png")
 
     @app.get("/api/projects/{project_id}/diagnostics")
     def diagnostics(project_id: str, run_id: str | None = None):

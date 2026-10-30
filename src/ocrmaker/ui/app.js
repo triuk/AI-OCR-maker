@@ -9,7 +9,22 @@ let refreshBusy = false, toastTimer;
 
 // Step previews of individual steps register here: stepPreviews[stepId] = async (container, project, step) => {}.
 // The container is emptied before each call; page images and overlays come from apiUrl()/api().
+// A step's preview lives in ui/previews/<step id>.js and is loaded when first needed (the listing's
+// `preview` flag says it exists); most use ocrmaker.pageViewer from viewer.js.
 const stepPreviews = window.stepPreviews = {};
+const previewScripts = {};
+function loadPreview(stepId) {
+  if (stepPreviews[stepId]) return Promise.resolve(stepPreviews[stepId]);
+  if (!steps.some(s => s.id === stepId && s.preview)) return Promise.resolve(null);
+  previewScripts[stepId] ??= new Promise(resolve => {
+    const script = document.createElement("script");
+    script.src = `previews/${encodeURIComponent(stepId)}.js`;
+    script.onload = () => resolve(stepPreviews[stepId] || null);
+    script.onerror = () => { delete previewScripts[stepId]; script.remove(); resolve(null); };
+    document.head.appendChild(script);
+  });
+  return previewScripts[stepId];
+}
 
 function toast(message) {
   $("toast").textContent = message; $("toast").hidden = false;
@@ -120,11 +135,14 @@ function renderStepPreview(p) {
   container.innerHTML = `<h2>${esc(step.label)}</h2><div class="facts">${esc(facts.join(" · "))}</div>
     ${step.message ? `<div class="notice ${step.state === "failed" ? "error" : ""}">${esc(step.message)}</div>` : ""}<div class="preview-body"></div>`;
   const body = container.querySelector(".preview-body");
-  const preview = stepPreviews[step.id];
   if (!step.implemented) body.innerHTML = `<p class="placeholder">Tento krok zatím není k dispozici.</p>`;
   else if (!["done", "warning"].includes(step.state)) body.innerHTML = `<p class="placeholder">Náhled bude k dispozici po dokončení kroku.</p>`;
-  else if (!preview) body.innerHTML = `<p class="placeholder">Tento krok zatím nemá náhled.</p>`;
-  else act(() => preview(body, p, step));
+  else act(async () => {
+    const preview = await loadPreview(step.id);
+    if (key !== previewKey) return;  // another step or state was opened meanwhile
+    if (!preview) body.innerHTML = `<p class="placeholder">Tento krok zatím nemá náhled.</p>`;
+    else await preview(body, p, step);
+  });
 }
 
 async function refresh() {

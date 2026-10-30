@@ -21,3 +21,6 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents
   `~/.local/share/ai-ocr-maker/tools/uv-<version>/uv lock`, then `./setup.sh`.
 - A workflow step is implemented by adding `src/ocrmaker/steps/<step id>_step.py` with a module-level `STEP`
   (see `src/ocrmaker/steps/__init__.py` and `src/ocrmaker/step.py`).
+- Page geometry, source page coordinates and working rasters are defined in `src/ocrmaker/pages.py`; the Import
+  result is their authority. A step preview is `src/ocrmaker/ui/previews/<step id>.js` (loaded on demand) and
+  normally draws its overlay through `ocrmaker.pageViewer` from `src/ocrmaker/ui/viewer.js`.

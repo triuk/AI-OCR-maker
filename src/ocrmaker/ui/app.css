@@ -120,3 +120,31 @@ dialog::backdrop { background: #12232f55; backdrop-filter: blur(3px); }
   .project-header { display: block; }
   .actions { justify-content: flex-start; margin-top: 12px; }
 }
+
+/* Step preview viewer (viewer.js): a page raster with the step's overlay, zoom and pan. */
+.viewer { display: flex; flex-direction: column; gap: 8px; }
+.viewer-toolbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.viewer-toolbar button { padding: 6px 11px; }
+.viewer-toolbar select { width: auto; padding: 6px 8px; }
+.viewer-gap { flex: 0 0 10px; }
+.viewer-zoom { min-width: 52px; text-align: center; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; }
+.viewer-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--muted); }
+.legend-item i { display: inline-block; width: 14px; height: 10px; margin-right: 5px; vertical-align: -1px; border: 2px solid; border-radius: 2px; }
+.viewer-info { color: var(--muted); font-size: 12px; min-height: 16px; }
+.viewer-stage { position: relative; overflow: hidden; height: max(360px, calc(100vh - 430px)); border: 1px solid var(--line); border-radius: 9px; background: var(--chip); cursor: grab; touch-action: none; user-select: none; }
+.viewer-stage:focus-visible { outline: 2px solid var(--focus-ring); }
+.viewer-stage.dragging { cursor: grabbing; }
+.viewer-canvas { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.viewer-image { display: block; background: #fff; box-shadow: 0 2px 14px #0003; image-rendering: auto; }
+.viewer-overlay { position: absolute; left: 0; top: 0; overflow: visible; }
+.viewer-overlay * { vector-effect: non-scaling-stroke; }
+.viewer-tip { position: absolute; z-index: 2; pointer-events: none; max-width: 420px; background: var(--ink); color: var(--paper); font-size: 12px; line-height: 1.4; padding: 6px 9px; border-radius: 6px; white-space: pre-line; }
+
+/* Import preview overlay. */
+.import-bounds { fill: none; stroke: #087f8c; stroke-width: 2.5; }
+.import-mediabox { fill: none; stroke: #98600d; stroke-width: 1.5; stroke-dasharray: 8 5; }
+.import-image { fill: none; stroke: #7a4fc4; stroke-width: 1.5; stroke-dasharray: 2 4; }
+.import-label { fill: #087f8c; font-weight: 700; paint-order: stroke; stroke: #fff; vector-effect: none; }
+.legend-item i.import-bounds { border-color: #087f8c; }
+.legend-item i.import-mediabox { border-color: #98600d; border-style: dashed; }
+.legend-item i.import-image { border-color: #7a4fc4; border-style: dotted; }
