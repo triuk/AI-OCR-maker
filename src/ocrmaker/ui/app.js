@@ -221,12 +221,18 @@ function openSettings() {
   fillLanguages($("settingsLanguage"), p.settings.language);
   fillProviders(p.settings.ai_provider, p.settings.ai_model);
   $("checkAiResult").textContent = ""; $("checkAiResult").className = "check-result";
+  $("settingsUnreadable").value = p.settings.problem_unreadable_confidence;
+  $("settingsDoubtful").value = p.settings.problem_doubtful_confidence;
+  $("settingsDictionary").value = (p.settings.project_dictionary || []).join("\n");
   $("settingsDialog").showModal();
 }
 
 async function saveSettings(event) {
   event.preventDefault();
-  await api(`/projects/${currentId}/settings`, "PUT", {language: $("settingsLanguage").value, ...aiChoice()});
+  await api(`/projects/${currentId}/settings`, "PUT", {language: $("settingsLanguage").value, ...aiChoice(),
+    problem_unreadable_confidence: Number($("settingsUnreadable").value),
+    problem_doubtful_confidence: Number($("settingsDoubtful").value),
+    project_dictionary: $("settingsDictionary").value});
   $("settingsDialog").close();
   await refresh();
 }

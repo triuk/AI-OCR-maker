@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import time
 
-from .. import tessdata, tesseract
+from .. import inkgaps, tessdata, tesseract
 from ..errors import StepError
 from ..pages import PREPARED_STEP, read_pages
 from ..step import Step, StepContext, StepResult
@@ -36,12 +36,16 @@ class OcrStep(Step):
                 ctx.progress(page["index"], len(pages), f"Stránka {number} z {len(pages)}")
                 started = time.monotonic()
                 raster = page["raster"]
-                recognised = recognizer.recognize(
-                    ctx.result(raster["step"]).path(raster["file"]), index=page["index"],
-                    dpi=sum(raster["dpi"]) / 2, to_source=raster["to_source"])
+                raster_path = ctx.result(raster["step"]).path(raster["file"])
+                recognised = recognizer.recognize(raster_path, index=page["index"], dpi=sum(raster["dpi"]) / 2,
+                                                  to_source=raster["to_source"])
+                recognised = inkgaps.find_empty_words(recognised, raster_path, raster["to_raster"],
+                                                      raster["to_source"])
                 ctx.output.write_json(page_file(page["index"]), recognised)
-                confidences = [word["confidence"] for word in page_words(recognised)]
+                # Word count and mean confidence describe Tesseract's readings; empty word boxes are counted apart.
+                confidences = [word["confidence"] for word in page_words(recognised) if word["text"]]
                 summary = {"index": page["index"], "file": page_file(page["index"]), "words": len(confidences),
+                           "empty_words": sum(1 for word in page_words(recognised) if not word["text"]),
                            "mean_confidence": round(sum(confidences) / len(confidences), 2) if confidences else None}
                 summaries.append(summary)
                 if not confidences:

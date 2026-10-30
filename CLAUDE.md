@@ -30,3 +30,7 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents
 - AI requests go through `ctx.language.ask(...)` (`src/ocrmaker/language.py`); the CLIs are found on PATH or through
   `OCRMAKER_CLAUDE` / `OCRMAKER_CODEX`. Seam 1 tests script the AI with `tests/fakes.py::ScriptedProvider`
   (the `language_provider` fixture).
+- Problem spots (Problem detection's result, read by AI reconstruction) are defined in
+  `src/ocrmaker/steps/problems_step.py`, their signals and kinds in `src/ocrmaker/problems.py`. Empty word boxes for
+  ink Tesseract missed are added by `src/ocrmaker/inkgaps.py` inside Local OCR. The hunspell dictionaries are pinned
+  in `src/ocrmaker/hunspell.py` (setup installs `ces`, others download on demand; `OCRMAKER_HUNSPELL` overrides the cache).

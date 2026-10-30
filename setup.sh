@@ -44,4 +44,5 @@ fi
 # .python-version pins the interpreter and uv.lock pins every package with hashes.
 UV_PYTHON_DOWNLOADS=automatic "$ocrmaker_uv" sync --locked
 .venv/bin/python -m ocrmaker.tessdata
+.venv/bin/python -m ocrmaker.hunspell
 echo "Připraveno. Aplikaci spustíte pomocí ./start.sh"

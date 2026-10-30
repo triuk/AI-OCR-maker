@@ -52,6 +52,12 @@ _Avoid_: Illegible word (illegible is the final state after reconstruction fails
 **Doubtful reading**:
 A problem spot read clearly but implausibly, such as `Rychva1d`; it may be a recognition mistake or a publisher error.
 
+**Empty word box**:
+A word box with no text, added where printed ink lies inside a text line but local OCR recognised no word there; it is always an unreadable word.
+
+**Project dictionary**:
+Words a project accepts as correctly spelled although the language dictionary lacks them, such as local names; a project setting.
+
 **Reconstruction**:
 Determining the printed text of a problem spot from the image, its partial reading, the surrounding text or an external source.
 _Avoid_: Correction (reconstruction never changes legible text)
