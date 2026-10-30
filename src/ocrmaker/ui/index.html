@@ -80,6 +80,15 @@
           <span id="checkAiResult" class="check-result" role="status"></span>
         </div>
       </fieldset>
+      <fieldset class="ai-settings">
+        <legend>Detekce problémů</legend>
+        <div class="field-row">
+          <label>Nečitelné slovo pod důvěrou (%)<input id="settingsUnreadable" type="number" min="0" max="100" step="1"></label>
+          <label>Pochybné čtení pod důvěrou (%)<input id="settingsDoubtful" type="number" min="0" max="100" step="1"></label>
+        </div>
+        <label>Slovník projektu (jedno slovo na řádek)<textarea id="settingsDictionary" rows="4" spellcheck="false"></textarea></label>
+        <p class="hint">Slova ze slovníku projektu se nehlásí jako chybějící ve slovníku. Změna se projeví po novém spuštění kroku.</p>
+      </fieldset>
       <div class="dialog-actions">
         <button id="deleteProject" type="button" class="danger push-left">Smazat projekt</button>
         <button type="button" data-close>Zrušit</button>

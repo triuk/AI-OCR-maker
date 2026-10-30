@@ -113,3 +113,64 @@ def columns_pdf(path: Path, columns=CZECH_COLUMNS, *, size=(420, 595), dpi: int 
 
 def ground_truth(columns=CZECH_COLUMNS) -> list[str]:
     return [word for text in columns for word in text.split()]
+
+
+# One column of known Czech text with two planted doubtful readings in mid-line, away from the binding:
+# a digit inside a word (as OCR reads "Rychvald" wrongly) and a name no dictionary knows.
+BINDING_TEXT = (
+    CZECH_COLUMNS[0] + " Na besedu do sálu v obci Rych4ald přijede také malíř Zbrdlíkov se svými obrazy. " + CZECH_COLUMNS[1])
+PLANTED = ("Rych4ald", "Zbrdlíkov")
+
+
+def _printed_page(document: pymupdf.Document, text: str, size, margin: float, fontsize: float) -> pymupdf.Page:
+    page = document.new_page(width=size[0], height=size[1])
+    writer = pymupdf.TextWriter(page.rect)
+    writer.fill_textbox(pymupdf.Rect(margin, margin, size[0] - margin, size[1] - margin), text,
+                        font=pymupdf.Font(fontbuffer=czech_font_buffer()), fontsize=fontsize)
+    writer.write_text(page)
+    return page
+
+
+def printed_words(text: str = BINDING_TEXT, *, size=(420, 595), margin: float = 36,
+                  fontsize: float = 11) -> list[tuple[str, tuple]]:
+    """Every printed word of binding_pdf with its box in source page coordinates: the ground truth."""
+    with pymupdf.open() as document:
+        page = _printed_page(document, text, size, margin, fontsize)
+        return [(word[4], tuple(word[:4])) for word in page.get_text("words")]
+
+
+def binding_pdf(path: Path, text: str = BINDING_TEXT, *, size=(420, 595), margin: float = 36,
+                fontsize: float = 11, band: float = 90, dpi: int = 300) -> Path:
+    """A scan of one column of text whose inner `band` points (the binding, on the left) are blurred and faded.
+
+    The blur and fading grow towards the page edge, as on a book scanned near its binding; Tesseract drops
+    some of the words there and reads others only in part.
+    """
+    import numpy
+
+    with pymupdf.open() as document:
+        page = _printed_page(document, text, size, margin, fontsize)
+        image = page.get_pixmap(dpi=dpi, colorspace=pymupdf.csGRAY)
+    pixels = numpy.frombuffer(image.samples, dtype=numpy.uint8).reshape(image.height, image.width)
+    pixels = pixels.astype(numpy.float32)
+    width = round(band * dpi / 72)
+    region = pixels[:, :width]
+    blurred, radius = region.copy(), round(6 * dpi / 300)
+    size_ = 2 * radius + 1
+    for _ in range(3):  # three box blurs approximate a Gaussian
+        for axis in (0, 1):
+            padded = numpy.pad(blurred, [(radius, radius) if a == axis else (0, 0) for a in (0, 1)], mode="edge")
+            summed = numpy.cumsum(padded, axis=axis, dtype=numpy.float64)
+            summed = numpy.concatenate([numpy.zeros_like(summed.take([0], axis=axis)), summed], axis=axis)
+            blurred = (summed.take(range(size_, summed.shape[axis]), axis=axis)
+                       - summed.take(range(0, summed.shape[axis] - size_), axis=axis)) / size_
+    weight = numpy.sqrt(numpy.linspace(1, 0, width))[None, :]  # 1 at the page edge, 0 where the band ends
+    mixed = weight * blurred + (1 - weight) * region
+    pixels[:, :width] = 255 - (255 - mixed) * (1 - 0.45 * weight)
+    scan = pymupdf.Pixmap(pymupdf.csGRAY, image.width, image.height,
+                          numpy.clip(pixels, 0, 255).astype(numpy.uint8).tobytes(), False)
+    output = pymupdf.open()
+    scanned = output.new_page(width=size[0], height=size[1])
+    scanned.insert_image(scanned.rect, stream=scan.tobytes("png"), keep_proportion=False)
+    output.save(path)
+    return path

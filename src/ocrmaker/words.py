@@ -15,7 +15,7 @@ and one page file per page, `pages/page-0001.json`:
         "block": 0, "paragraph": 0,            # Tesseract's block and paragraph numbers on the page (hints)
         "words": [{
             "id": "p1-w1",                     # unique in the project, stable across later steps
-            "text": "Obecní",                  # NFC; never empty or whitespace only
+            "text": "Obecní",                  # NFC; never whitespace only; "" only for an empty word box
             "bbox": [x0, y0, x1, y1],          # the word box, source page coordinates
             "confidence": 96.1,                # Tesseract's word confidence, 0-100
             "chars": [{"text": "O", "bbox": [...], "confidence": 99.6}, ...]}]}]}
@@ -24,6 +24,11 @@ Word and line boxes describe the page as displayed (text upright), mapped back i
 coordinates, so on a page with /Rotate a word box is upright only after `pages.display_matrix`. Word order
 within a line is left to right as displayed; the order of lines is Tesseract's and carries no meaning
 beyond that (reading order is decided later). Whitespace-only boxes are dropped (ADR 0005).
+
+Empty word boxes: ink inside a line that no recognised word covers becomes a word with text "", confidence
+0.0, no chars and an id `p<page>-e<n>` (ocrmaker.inkgaps), in its line at its place in display order. Every
+consumer must accept them; the exporter skips them until a later step gives them text. `ocr.json` counts
+them apart: a page's "words" and "mean_confidence" cover only Tesseract's readings, "empty_words" the rest.
 """
 from __future__ import annotations
 

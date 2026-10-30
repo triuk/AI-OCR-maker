@@ -13,6 +13,8 @@ dependencies = [
   "python-multipart>=0.0.32,<1",
   "pymupdf>=2.0,<3",
   "tesserocr>=2.12,<3",
+  "spylls>=0.1.7,<0.2",
+  "numpy>=2.5,<3",
 ]
 
 [dependency-groups]

@@ -23,7 +23,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from .. import articletext, textlayer, verify
+from .. import articletext, hunspell, textlayer, verify
 from ..layout import LAYOUT_STEP, read_layout_page
 from ..pages import PREPARED_STEP, read_pages
 from ..reading_order import ORDER_FILE, ORDER_STEP
@@ -119,23 +119,19 @@ class ExportStep(Step):
         return result, order.get("links", [])
 
     def dictionary(self, ctx: StepContext):
-        """The dictionary deciding unclear line-end hyphens in the article text: known(word) -> bool, or None.
+        """The dictionary deciding unclear line-end hyphens in the article text: known(word) -> bool.
 
-        It is hunspell for the document language (ocrmaker.hunspell, brought by Problem detection) plus the
-        project dictionary setting, when they are available; without them the document's own words and the
-        typographic rules decide (articletext.join_hyphenated).
+        Hunspell for the document language plus the project dictionary, as in Problem detection. Without a
+        hunspell dictionary only the project dictionary, the document's own words and the typographic rules
+        decide (articletext.join_hyphenated).
         """
-        try:
-            from .. import hunspell
-        except ImportError:
-            return None
-        project = {word.lower() for word in ctx.settings.get("project_dictionary", [])}
+        project = {word.casefold() for word in ctx.settings.get("project_dictionary") or []}
         try:
             speller = hunspell.speller(ctx.settings["language"])
-        except Exception as exc:  # a missing dictionary must not stop the export
+        except hunspell.DictionaryError as exc:  # a missing dictionary must not stop the export
             ctx.record("article_text_dictionary", error=str(exc))
-            return (lambda word: word.lower() in project) if project else None
-        return lambda word: word.lower() in project or bool(speller.lookup(word))
+            return lambda word: word.casefold() in project
+        return lambda word: word.casefold() in project or bool(speller.lookup(word))
 
     def write_article_text(self, ctx: StepContext, pages: list[dict], name: str) -> dict:
         """Write the article text Markdown into the outputs; returns its statistics."""

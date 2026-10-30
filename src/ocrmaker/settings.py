@@ -1,7 +1,10 @@
 """Per-project settings: defaults, Czech-labelled choices and validation."""
 from __future__ import annotations
 
+import unicodedata
+
 from . import providers
+from .problems import THRESHOLDS
 from .tessdata import MODELS
 
 # Document languages offered in the UI; each has a pinned tessdata_best model.
@@ -13,6 +16,9 @@ DEFAULTS = {
     "ai_provider": providers.DEFAULT,
     # None means the provider's default model.
     "ai_model": None,
+    # Problem detection: Tesseract confidence thresholds (0-100) and words the project accepts as correct.
+    **THRESHOLDS,
+    "project_dictionary": [],
 }
 
 
@@ -36,11 +42,38 @@ def _ai_model(value):
     return value
 
 
+def _confidence(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 100:
+        raise ValueError("Práh důvěry musí být číslo od 0 do 100.")
+    return float(value)
+
+
+def _project_dictionary(value):
+    """A list of words, or text with one word per line; kept NFC, stripped, without duplicates."""
+    if isinstance(value, str):
+        value = value.splitlines()
+    if not isinstance(value, list) or not all(isinstance(word, str) for word in value):
+        raise ValueError("Slovník projektu musí být seznam slov.")
+    words = []
+    for word in value:
+        word = unicodedata.normalize("NFC", word.strip())
+        if not word:
+            continue
+        if any(char.isspace() for char in word):
+            raise ValueError(f"Položka slovníku projektu „{word}“ musí být jedno slovo.")
+        if word not in words:
+            words.append(word)
+    return words
+
+
 # One validator per setting; later tickets add their settings (thresholds, web lookup) here.
 VALIDATORS = {
     "language": _language,
     "ai_provider": _ai_provider,
     "ai_model": _ai_model,
+    "problem_unreadable_confidence": _confidence,
+    "problem_doubtful_confidence": _confidence,
+    "project_dictionary": _project_dictionary,
 }
 assert set(VALIDATORS) == set(DEFAULTS)
 
@@ -53,6 +86,8 @@ def merged(current: dict, changes: dict) -> dict:
     result = DEFAULTS | current
     for key, value in changes.items():
         result[key] = VALIDATORS[key](value)
+    if result["problem_unreadable_confidence"] > result["problem_doubtful_confidence"]:
+        raise ValueError("Práh nečitelného slova nesmí být vyšší než práh pochybného čtení.")
     if {"ai_provider", "ai_model"} & set(changes) and result["ai_model"] is not None:
         provider = providers.CATALOG[result["ai_provider"]]
         if result["ai_model"] not in {model["id"] for model in provider.models()}:

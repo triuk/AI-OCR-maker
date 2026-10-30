@@ -44,3 +44,7 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents
 - Export also writes the article text Markdown (`<stem>-ocr.md`; format and hyphenation rules in
   `src/ocrmaker/articletext.py`). Both outputs take every word's text from `ExportStep.exported_words`, the one
   place where AI reconstructions and manual corrections must be applied.
+- Problem spots (Problem detection's result, read by AI reconstruction) are defined in
+  `src/ocrmaker/steps/problems_step.py`, their signals and kinds in `src/ocrmaker/problems.py`. Empty word boxes for
+  ink Tesseract missed are added by `src/ocrmaker/inkgaps.py` inside Local OCR. The hunspell dictionaries are pinned
+  in `src/ocrmaker/hunspell.py` (setup installs `ces`, others download on demand; `OCRMAKER_HUNSPELL` overrides the cache).

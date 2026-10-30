@@ -274,6 +274,10 @@ def render(source_name: str, pages: list[dict], links: list[dict], known: Dictio
     block kinds as in ocrmaker.layout). links: [{"from", "to"}] articles continued on the next page.
     known: the dictionary that decides unclear line-end hyphens, or None.
     """
+    # An empty word box (text unknown, ocrmaker.inkgaps) has no text to write until it is reconstructed.
+    pages = [{**page, "articles": [{**article, "blocks": [
+        {**block, "lines": [[word for word in line if word["text"]] for line in block["lines"]]}
+        for block in article["blocks"]]} for article in page["articles"]]} for page in pages]
     running, headers, footers = [], [], []
     for page in pages:
         texts = {"header": [], "footer": []}

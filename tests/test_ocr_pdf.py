@@ -47,7 +47,7 @@ def test_run_goes_through_import_preparation_local_ocr_and_export(columns):
 
     # Without an AI provider the reading order is geometric, with a warning.
     assert states(project) == {"import": "done", "prepare": "done", "ocr": "done", "layout": "done",
-                               "order": "warning", "problems": "pending", "reconstruct": "pending",
+                               "order": "warning", "problems": "done", "reconstruct": "pending",
                                "lookup": "pending", "review": "pending", "export": "done"}
     outputs = workflow.outputs(project["id"])
     assert [output["name"] for output in outputs] == ["zpravodaj-2000-05-ocr.md", "zpravodaj-2000-05-ocr.pdf"]
