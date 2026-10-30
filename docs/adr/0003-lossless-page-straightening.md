@@ -1,0 +1,3 @@
+# Straighten pages losslessly; keep the scan image bytes unchanged
+
+The OCR PDF never contains re-encoded scan images. A skewed page is straightened in the output only by rotating the original image through the page's transformation matrix, and trimmed only through the CropBox; both are lossless and reversible. Non-linear image preparation (dewarping near the binding, contrast, denoising) affects only the working rasters used for recognition, and every step stores geometry in the coordinates of the source page, so word boxes always land on the original image. We rejected saving a straightened or cleaned image because recompression loses detail and makes the output an altered copy of the source.

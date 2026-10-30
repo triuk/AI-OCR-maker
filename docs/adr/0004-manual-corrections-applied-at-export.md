@@ -1,0 +1,3 @@
+# Manual corrections are applied at export and discarded when an earlier step reruns
+
+Manual corrections live in their own layer and are merged into the result only when the project is exported; making one never reruns earlier steps, so the workflow flows forward from review to export. Explicitly rerunning an earlier step starts from a clean slate and discards all manual corrections rather than trying to re-anchor them onto the new result. Unlike ai-asr-sub-maker, where corrections trigger reruns and survive them, we chose simplicity and a predictable state over preserving review work across reruns, which are expected to be rare once review has started.
