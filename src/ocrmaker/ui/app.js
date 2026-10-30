@@ -181,18 +181,63 @@ async function createProject(event) {
   }
 }
 
+// AI provider and model; an empty model value means the provider's default model.
+function fillProviders(provider, model) {
+  $("settingsProvider").innerHTML = (choices.ai_provider || []).map(c => `<option value="${esc(c.id)}">${esc(c.label)}</option>`).join("");
+  $("settingsProvider").value = provider;
+  fillModels(model);
+}
+function fillModels(model) {
+  const provider = (choices.ai_provider || []).find(c => c.id === $("settingsProvider").value);
+  const models = (choices.ai_model || {})[$("settingsProvider").value] || [];
+  const fallback = provider && models.find(m => m.id === provider.default_model);
+  $("settingsModel").innerHTML = `<option value="">Výchozí${fallback ? ` (${esc(fallback.label)})` : ""}</option>` +
+    models.map(m => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join("");
+  $("settingsModel").value = model || "";
+}
+function aiChoice() { return {ai_provider: $("settingsProvider").value, ai_model: $("settingsModel").value || null}; }
+
 function openSettings() {
   const p = current();
   if (!p) return;
   fillLanguages($("settingsLanguage"), p.settings.language);
+  fillProviders(p.settings.ai_provider, p.settings.ai_model);
+  $("checkAiResult").textContent = ""; $("checkAiResult").className = "check-result";
   $("settingsDialog").showModal();
 }
 
 async function saveSettings(event) {
   event.preventDefault();
-  await api(`/projects/${currentId}/settings`, "PUT", {language: $("settingsLanguage").value});
+  await api(`/projects/${currentId}/settings`, "PUT", {language: $("settingsLanguage").value, ...aiChoice()});
   $("settingsDialog").close();
   await refresh();
+}
+
+// Sends a tiny request with the chosen (possibly unsaved) provider and model.
+async function checkAi() {
+  const result = $("checkAiResult");
+  $("checkAi").disabled = true;
+  result.className = "check-result"; result.textContent = "Ověřuji…";
+  try {
+    const answer = await api(`/projects/${currentId}/ai-check`, "POST", aiChoice());
+    result.className = "check-result " + (answer.ok ? "ok" : "failed");
+    result.textContent = answer.ok ? `${answer.message} Odpověď za ${seconds(answer.duration)}.` : answer.message;
+  } catch (e) {
+    result.className = "check-result failed"; result.textContent = e.message;
+  } finally {
+    $("checkAi").disabled = false;
+  }
+}
+
+function tokens(usage) {
+  if (!usage) return "spotřeba tokenů neznámá";
+  const n = value => value.toLocaleString("cs-CZ");
+  return `vstup ${n(usage.input)} (z mezipaměti ${n(usage.cached_input)}) · výstup ${n(usage.output)} tokenů`;
+}
+function recordMessage(r) {
+  if (r.kind !== "ai_request") return r.message || "";
+  const provider = ((choices.ai_provider || []).find(c => c.id === r.provider) || {}).label || r.provider;
+  return [`${provider} · ${r.model || "výchozí model"} · ${r.purpose}`, tokens(r.usage), r.error].filter(Boolean).join(" · ");
 }
 
 async function deleteProject() {
@@ -210,7 +255,7 @@ async function showDiagnostics() {
   const labels = Object.fromEntries(steps.map(s => [s.id, s.label]));
   const rows = data.records.filter(r => r.kind !== "step_started").reverse();
   $("diagnosticsBody").innerHTML = rows.length ? `<table><thead><tr><th>Čas</th><th>Záznam</th><th>Krok</th><th>Výsledek</th><th>Trvání</th><th>Zpráva</th></tr></thead><tbody>${
-    rows.map(r => `<tr><td>${esc(dateTime(r.time))}</td><td>${esc(r.kind)}</td><td>${esc(labels[r.step] || r.step || "")}</td><td>${esc(r.outcome || "")}</td><td>${esc(seconds(r.duration))}</td><td>${esc(r.message || "")}</td></tr>`).join("")
+    rows.map(r => `<tr><td>${esc(dateTime(r.time))}</td><td>${esc(r.kind)}</td><td>${esc(labels[r.step] || r.step || "")}</td><td>${esc(r.outcome || "")}</td><td>${esc(seconds(r.duration))}</td><td>${esc(recordMessage(r))}</td></tr>`).join("")
   }</tbody></table>` : `<p class="hint">Projekt zatím nemá žádný záznam.</p>`;
   $("diagnosticsDialog").showModal();
 }
@@ -222,6 +267,8 @@ function wireControls() {
   $("settingsButton").onclick = openSettings;
   $("settingsForm").onsubmit = event => act(() => saveSettings(event));
   $("deleteProject").onclick = () => act(deleteProject);
+  $("settingsProvider").onchange = () => fillModels(null);
+  $("checkAi").onclick = checkAi;
   $("diagnosticsButton").onclick = () => act(showDiagnostics);
   $("runButton").onclick = () => act(async () => { await api(`/projects/${currentId}/run`, "POST"); await refresh(); });
   $("exportButton").onclick = () => act(async () => { await api(`/projects/${currentId}/export`, "POST"); await refresh(); });

@@ -67,6 +67,18 @@
     <form id="settingsForm" method="dialog">
       <h2>Nastavení projektu</h2>
       <label>Jazyk dokumentu<select id="settingsLanguage" name="language"></select></label>
+      <fieldset class="ai-settings">
+        <legend>AI</legend>
+        <div class="field-row">
+          <label>Poskytovatel<select id="settingsProvider" name="ai_provider"></select></label>
+          <label>Model<select id="settingsModel" name="ai_model"></select></label>
+        </div>
+        <p class="hint">Požadavky jdou přes vaše předplatné (claude -p nebo codex exec), nikdy přes API klíč.</p>
+        <div class="ai-check">
+          <button id="checkAi" type="button">Ověřit AI</button>
+          <span id="checkAiResult" class="check-result" role="status"></span>
+        </div>
+      </fieldset>
       <div class="dialog-actions">
         <button id="deleteProject" type="button" class="danger push-left">Smazat projekt</button>
         <button type="button" data-close>Zrušit</button>

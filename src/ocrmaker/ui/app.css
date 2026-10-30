@@ -101,6 +101,15 @@ dialog.wide-dialog { width: min(980px, 94vw); }
 dialog::backdrop { background: #12232f55; backdrop-filter: blur(3px); }
 .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
 .push-left { margin-right: auto; }
+.ai-settings { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px 4px; margin: 0 0 6px; }
+.ai-settings legend { font-weight: 600; padding: 0 5px; }
+.field-row { display: flex; gap: 12px; }
+.field-row > label { flex: 1; min-width: 0; }
+.ai-check { display: flex; gap: 10px; align-items: center; margin: 10px 0; }
+.ai-check button { white-space: nowrap; flex: none; }
+.check-result { font-size: 12px; line-height: 1.45; }
+.check-result.ok { color: var(--accent-strong); }
+.check-result.failed { color: var(--error); }
 .hint { color: var(--muted); font-size: 12px; line-height: 1.5; }
 .diagnostics { max-height: 60vh; overflow: auto; font-size: 12px; }
 .diagnostics table { border-collapse: collapse; width: 100%; }

@@ -100,6 +100,11 @@ def create_api(workflow: Workflow, *, token: str | None = None, control=None) ->
     def put_settings(project_id: str, changes: dict):
         return workflow.update_settings(project_id, changes)
 
+    @app.post("/api/projects/{project_id}/ai-check")
+    def ai_check(project_id: str, changes: dict | None = None):
+        # A failed check is a valid answer ({"ok": false, "message": Czech}), not an HTTP error.
+        return workflow.check_ai(project_id, changes)
+
     @app.post("/api/projects/{project_id}/run", status_code=202)
     def run(project_id: str):
         return workflow.start(project_id, "run")

@@ -21,3 +21,6 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents
   `~/.local/share/ai-ocr-maker/tools/uv-<version>/uv lock`, then `./setup.sh`.
 - A workflow step is implemented by adding `src/ocrmaker/steps/<step id>_step.py` with a module-level `STEP`
   (see `src/ocrmaker/steps/__init__.py` and `src/ocrmaker/step.py`).
+- AI requests go through `ctx.language.ask(...)` (`src/ocrmaker/language.py`); the CLIs are found on PATH or through
+  `OCRMAKER_CLAUDE` / `OCRMAKER_CODEX`. Seam 1 tests script the AI with `tests/fakes.py::ScriptedProvider`
+  (the `language_provider` fixture).
