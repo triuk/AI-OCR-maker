@@ -1,5 +1,7 @@
 """Import: reads the source PDF, refuses one with a text layer, records page geometry, renders working rasters.
 
+A text layer stops Import: an invisible one (an earlier OCR) with the offer to remove it (the workflow's
+remove_text_layer, which makes a clean working copy that ctx.source_pdf then points to), a visible one for good.
 Its result is the page geometry contract described in `ocrmaker.pages`: `pages.json` plus one PNG working
 raster per page, rendered at the scan image's native resolution where possible.
 """
@@ -7,7 +9,7 @@ from __future__ import annotations
 
 import time
 
-from .. import pdf
+from .. import existing_text, pdf
 from ..errors import StepError
 from ..pages import PAGES_FILE, apply_rect, raster_name, read_pages
 from ..step import Step, StepContext, StepResult
@@ -31,16 +33,14 @@ class ImportStep(Step):
             raise StepError(str(exc)) from exc
         with document:
             total = document.page_count
-            text_pages = {page.number: count for page in document if (count := pdf.text_word_count(page))}
-            if text_pages:
-                numbers = [index + 1 for index in text_pages]
-                ctx.record("import", pages=total, text_layer_pages=numbers,
-                           text_layer_words=sum(text_pages.values()), outcome="text_layer")
-                raise StepError(
-                    "Zdrojové PDF už obsahuje textovou vrstvu "
-                    f"({'strana' if len(numbers) == 1 else 'strany'} {_page_list(numbers)}). "
-                    "Nové OCR by text zdvojilo, proto se projekt nezpracuje. "
-                    "Odstranění existující textové vrstvy zatím aplikace nenabízí.")
+            layer = existing_text.survey(document)
+            if layer:
+                ctx.record("import", pages=total, text_layer_pages=layer["pages"],
+                           text_layer_visible_pages=layer["visible_pages"], text_layer_words=layer["words"],
+                           text_layer="visible" if layer["visible"] else "invisible", outcome="text_layer")
+                if layer["visible"]:
+                    raise StepError(existing_text.visible_message(layer))
+                raise StepError(existing_text.invisible_message(layer), action=existing_text.REMOVE_ACTION)
             pages, records, low = [], [], []
             for page in document:
                 ctx.checkpoint()

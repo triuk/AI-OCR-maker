@@ -12,13 +12,14 @@ A4 = (595, 842)
 
 def scan_pdf(path: Path, *, pages: int = 1, text: str = SAMPLE_TEXT, dpi: int = 150, size=A4,
              rotation: int = 0, cropbox: tuple | None = None, mark: tuple | None = None,
-             invisible_text: str | None = None) -> Path:
+             invisible_text: str | None = None, text_under_scan: str | None = None) -> Path:
     """A scan-like PDF: each page is one raster image of printed text covering the page, without a text layer.
 
     size is the page size in points, dpi the scan image's resolution (pixels per inch of the page).
     rotation sets the page's /Rotate; cropbox (x0, y0, x1, y1, top-left origin as PyMuPDF uses it) sets
     its CropBox. mark is a rectangle in the same coordinates printed solid black into the scan.
-    invisible_text adds an invisible text layer (render mode 3), as an earlier OCR would.
+    invisible_text adds an invisible text layer (render mode 3), as an earlier OCR would; text_under_scan adds
+    painted text hidden beneath the scan image, the other way earlier OCR tools hide their text.
     """
     source = pymupdf.open()
     output = pymupdf.open()
@@ -30,6 +31,8 @@ def scan_pdf(path: Path, *, pages: int = 1, text: str = SAMPLE_TEXT, dpi: int = 
             page.draw_rect(pymupdf.Rect(mark), color=(0, 0, 0), fill=(0, 0, 0))
         image = page.get_pixmap(dpi=dpi, colorspace=pymupdf.csGRAY)
         scanned = output.new_page(width=size[0], height=size[1])
+        if text_under_scan:
+            scanned.insert_text((72, 100), text_under_scan, fontsize=14, fontname="helv")
         scanned.insert_image(scanned.rect, stream=image.tobytes("png"), keep_proportion=False)
         if invisible_text:
             scanned.insert_text((72, 100), invisible_text, fontsize=14, fontname="helv", render_mode=3)

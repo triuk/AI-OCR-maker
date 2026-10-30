@@ -91,6 +91,7 @@ main { flex: 1; min-width: 0; padding: 20px 28px 12px; height: 100vh; overflow: 
 
 .notice { background: var(--warning-light); color: var(--warning); padding: 11px 14px; border-radius: 8px; line-height: 1.5; font-size: 12px; margin-bottom: 14px; white-space: pre-line; }
 .notice.error { background: var(--error-light); color: var(--error); }
+.notice .notice-action { display: block; margin-top: 9px; }
 .step-preview { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; min-height: 240px; }
 .step-preview h2 { margin-bottom: 6px; }
 .step-preview .facts { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
@@ -179,3 +180,39 @@ dialog::backdrop { background: #12232f55; backdrop-filter: blur(3px); }
 .legend-item i.export-word { border-color: #1c7ed6; background: #1c7ed61f; }
 .export-word.export-finding { fill: #e8590c40; stroke: #d9480f; stroke-width: 2.5; }
 .legend-item i.export-finding { border-color: #d9480f; background: #e8590c40; }
+
+/* Layout preview: blocks by kind, with their numbers. */
+.layout-block { fill-opacity: .12; stroke-width: 1.6; }
+.layout-column { fill: none; stroke: #6b7a84; stroke-width: 1; stroke-dasharray: 6 5; }
+.layout-body { fill: #1c7ed6; stroke: #1c7ed6; }
+.layout-heading { fill: #862e9c; stroke: #862e9c; }
+.layout-caption { fill: #2b8a3e; stroke: #2b8a3e; }
+.layout-header, .layout-footer { fill: #d9480f; stroke: #d9480f; }
+.layout-table { fill: #0c8599; stroke: #0c8599; }
+.layout-ad { fill: #c2255c; stroke: #c2255c; }
+.layout-block:hover { fill-opacity: .25; stroke-width: 3; }
+.block-badge rect { fill-opacity: .9; stroke: none; }
+.block-badge text { fill: #fff; stroke: none; font-weight: 700; }
+.legend-item i.layout-body { border-color: #1c7ed6; background: #1c7ed61f; }
+.legend-item i.layout-heading { border-color: #862e9c; background: #862e9c1f; }
+.legend-item i.layout-caption { border-color: #2b8a3e; background: #2b8a3e1f; }
+.legend-item i.layout-header, .legend-item i.layout-footer { border-color: #d9480f; background: #d9480f1f; }
+.legend-item i.layout-table { border-color: #0c8599; background: #0c85991f; }
+.legend-item i.layout-column { border-color: #6b7a84; border-style: dashed; }
+
+/* Reading order preview: articles numbered in reading order, arrows between their blocks. */
+.order-block { fill-opacity: .14; stroke-width: 1.6; }
+.order-block:hover { fill-opacity: .28; stroke-width: 3; }
+.order-arrow { stroke-width: 2.5; fill: none; opacity: .85; }
+.order-arrow-head { fill: #495057; }
+.order-badge circle { stroke: #fff; stroke-width: 1.5; }
+.order-badge text { fill: #fff; stroke: none; font-weight: 700; }
+.order-1 { fill: #1c7ed6; stroke: #1c7ed6; } .order-2 { fill: #e8590c; stroke: #e8590c; }
+.order-3 { fill: #2b8a3e; stroke: #2b8a3e; } .order-4 { fill: #862e9c; stroke: #862e9c; }
+.order-5 { fill: #0c8599; stroke: #0c8599; } .order-6 { fill: #c2255c; stroke: #c2255c; }
+.order-7 { fill: #5c940d; stroke: #5c940d; } .order-8 { fill: #364fc7; stroke: #364fc7; }
+.order-header, .order-footer { fill: #868e96; stroke: #868e96; }
+.order-ad { fill: #f08c00; stroke: #f08c00; }
+.legend-item i.order-1 { border-color: #1c7ed6; background: #1c7ed61f; }
+.legend-item i.order-header, .legend-item i.order-footer { border-color: #868e96; background: #868e961f; }
+.legend-item i.order-ad { border-color: #f08c00; background: #f08c001f; }

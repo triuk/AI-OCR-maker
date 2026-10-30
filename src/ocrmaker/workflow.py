@@ -14,7 +14,7 @@ import traceback
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from . import providers, report
+from . import existing_text, providers, report
 from . import settings as project_settings
 from .diagnostics import Diagnostics, new_run_id
 from .errors import Conflict, ConfirmationRequired, StepError, StepInterrupted
@@ -28,6 +28,7 @@ from .store import ProjectStore, now
 
 PENDING, RUNNING, DONE, WARNING, FAILED = "pending", "running", "done", "warning", "failed"
 FINISHED = (DONE, WARNING)
+REMOVE_ACTION = existing_text.REMOVE_ACTION
 # Progress is written to the project document at most this often (seconds).
 PROGRESS_INTERVAL = 0.25
 # Manual corrections belong to the review; rerunning a step before it discards them (ADR 0004).
@@ -40,7 +41,7 @@ CHECK_SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "re
 
 def _pending_step() -> dict:
     return {"state": PENDING, "message": None, "started": None, "finished": None, "duration": None,
-            "run_id": None, "progress": None}
+            "run_id": None, "progress": None, "action": None}
 
 
 def _plural(count: int, one: str, few: str, many: str) -> str:
@@ -121,12 +122,21 @@ class Workflow:
         return self._operate(project_id, self._plan_rerun(project_id, step_id, discard_corrections),
                              operation="rerun")
 
+    def remove_text_layer(self, project_id: str) -> dict:
+        """Remove an earlier OCR's invisible text layer into a clean working copy and run again from Import.
+
+        The clean copy becomes the base of every step and of the export (base_pdf); the source PDF stays as it
+        is. A PDF with visible text, or without any text layer, is refused (ValueError, Czech).
+        """
+        return self._operate(project_id, self._plan_remove_text_layer(project_id))
+
     def start(self, project_id: str, operation: str = "run", **options) -> dict:
-        """Start run, export or rerun (with step_id, discard_corrections) in the background.
+        """Start run, export, rerun (with step_id, discard_corrections) or remove_text_layer in the background.
 
         Refusals (a run in progress, a needed confirmation, nothing to run) are raised here, synchronously.
         """
-        plans = {"run": self._plan_run, "export": self._plan_export, "rerun": self._plan_rerun}
+        plans = {"run": self._plan_run, "export": self._plan_export, "rerun": self._plan_rerun,
+                 REMOVE_ACTION: self._plan_remove_text_layer}
         if operation not in plans:
             raise ValueError("Neznámá operace pracovního postupu.")
         return self._operate(project_id, plans[operation](project_id, **options), background=True,
@@ -169,6 +179,11 @@ class Workflow:
         return {"corrections": corrections, "steps": list(STEP_IDS[index:])}
 
     # Results and diagnostics -------------------------------------------------------------------------
+
+    def base_pdf(self, project_id: str) -> Path:
+        """The PDF steps work from (ctx.source_pdf): the project's source copy, or its clean working copy."""
+        self.store.get(project_id)
+        return self.store.base_pdf(project_id)
 
     def result(self, project_id: str, step_id: str) -> StepResult | None:
         """The committed result of a finished step, or None."""
@@ -305,6 +320,36 @@ class Workflow:
                 self._run_sequence(project_id, run_id, stop, STEPS[FIRST_MANUAL:])
         return work
 
+    def _plan_remove_text_layer(self, project_id: str) -> Callable[[str, threading.Event], None]:
+        self.store.get(project_id)
+        layer = existing_text.survey_file(self.store.base_pdf(project_id))
+        if layer is None or layer["visible"]:
+            raise ValueError(existing_text.refusal_message(layer))
+        rerun = self._plan_rerun(project_id, PAGES_STEP)
+
+        def work(run_id, stop):
+            clock = time.monotonic()
+            diagnostics = Diagnostics(self.store.diagnostics_dir(project_id))
+            source = self.store.source_pdf(project_id)
+            facts = {"text_layer_pages": layer["pages"], "text_layer_words": layer["words"]}
+            try:
+                removed = self.store.write_working_pdf(project_id,
+                                                       lambda target: existing_text.remove(source, target))
+            except Exception as exc:  # noqa: BLE001 - the stop stays on Import, with the reason
+                message = str(exc) if isinstance(exc, ValueError) else \
+                    f"Odstranění textové vrstvy skončilo neočekávanou chybou: {exc}"
+                diagnostics.record(run_id, "text_layer_removal", outcome=FAILED, message=message,
+                                   error=traceback.format_exc(), **facts)
+                self.store.mutate(project_id, lambda document: document["steps"][PAGES_STEP].update(
+                    state=FAILED, message=message, action=None))
+                return
+            removal = {"pages": layer["pages"], "words": layer["words"], "created": now()}
+            self.store.mutate(project_id, lambda document: document.update(working_copy=removal))
+            diagnostics.record(run_id, "text_layer_removal", outcome="removed", images=removed["images"],
+                               seconds=round(time.monotonic() - clock, 3), **facts)
+            rerun(run_id, stop)
+        return work
+
     # Execution ---------------------------------------------------------------------------------------
 
     def _operate(self, project_id: str, work: Callable[[str, threading.Event], None], *,
@@ -383,21 +428,21 @@ class Workflow:
         settings = project_settings.merged(document["settings"], {})
         context = StepContext(
             step_id=definition.id, project_id=project_id, run_id=run_id, settings=settings,
-            source_pdf=self.store.source_pdf(project_id), output=StepOutput(staging),
+            source_pdf=self.store.base_pdf(project_id), output=StepOutput(staging),
             language=LanguageSession(self.language, settings, stopped=stop.is_set,
                                      record=lambda kind, **data: diagnostics.record(run_id, kind, step=definition.id,
                                                                                      **data)),
             results=lambda step_id: self.result(project_id, step_id), progress=progress, stopped=stop.is_set,
             record=lambda kind, **data: diagnostics.record(run_id, kind, **data),
             source_name=document["source"]["file_name"])
-        error = None
+        error = action = None
         try:
             step.run(context)
             context.checkpoint()
         except StepInterrupted:
             outcome, state, message = "interrupted", PENDING, None
         except StepError as exc:
-            outcome, state, message = FAILED, FAILED, str(exc)
+            outcome, state, message, action = FAILED, FAILED, str(exc), exc.action
         except Exception as exc:  # noqa: BLE001 - any defect fails only this step, with a trace in diagnostics
             outcome, state = FAILED, FAILED
             message = f"Krok skončil neočekávanou chybou: {exc}"
@@ -412,7 +457,7 @@ class Workflow:
 
         def end(document):
             entry = document["steps"][definition.id]
-            entry.update(state=state, message=message, progress=None)
+            entry.update(state=state, message=message, progress=None, action=action)
             if state == PENDING:
                 entry.update(started=None, run_id=None)
             else:
