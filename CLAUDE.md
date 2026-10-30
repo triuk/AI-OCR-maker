@@ -27,6 +27,9 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents
 - Recognised words (Local OCR's result: lines, word boxes, char boxes, confidence) are defined in
   `src/ocrmaker/words.py`; the prepared pages with their page transform in `src/ocrmaker/pages.py`. The OCR PDF
   is written by `src/ocrmaker/textlayer.py` from a per-page plan of lines of words, which the Export step builds.
+- Blocks (Layout's result, word ids per line) are defined in `src/ocrmaker/layout.py`; articles in reading order,
+  their kinds and cross-page links (Reading order's result) in `src/ocrmaker/reading_order.py`. Export writes the
+  text layer article by article, block by block. Seam 1 tests print laid-out pages with `tests/layout_pdfs.py`.
 - AI requests go through `ctx.language.ask(...)` (`src/ocrmaker/language.py`); the CLIs are found on PATH or through
   `OCRMAKER_CLAUDE` / `OCRMAKER_CODEX`. Seam 1 tests script the AI with `tests/fakes.py::ScriptedProvider`
   (the `language_provider` fixture).
