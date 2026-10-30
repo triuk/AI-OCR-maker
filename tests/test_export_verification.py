@@ -38,7 +38,7 @@ def first_word(workflow, project) -> dict:
 
 
 def written_words(workflow, project) -> list[str]:
-    [output] = workflow.outputs(project["id"])
+    [output] = [item for item in workflow.outputs(project["id"]) if item["name"].endswith(".pdf")]
     with pymupdf.open(workflow.output(project["id"], output["name"])) as document:
         return [word[4] for word in document[0].get_text("words", sort=False)]
 

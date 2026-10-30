@@ -78,7 +78,7 @@ def test_removing_an_invisible_text_layer_continues_to_an_ocr_pdf_without_duplic
         assert document.page_count and all(page.get_text() == "" for page in document)
         assert [page.get_pixmap().samples for page in document] == [page.get_pixmap().samples for page in original]
     assert image_objects(clean) == image_objects(source)
-    [output] = workflow.outputs(project["id"])
+    [output] = [item for item in workflow.outputs(project["id"]) if item["name"].endswith(".pdf")]
     ocr = workflow.result(project["id"], "ocr")
     with pymupdf.open(workflow.output(project["id"], output["name"])) as document:
         for page in document:

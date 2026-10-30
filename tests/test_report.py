@@ -96,7 +96,7 @@ def test_the_report_lists_the_export_outputs_and_its_verification(recognised):
 
     export = workflow.report(project["id"])["sections"]["export"]
 
-    assert export["outputs"] == ["zpravodaj-2000-05-ocr.pdf"]
+    assert export["outputs"] == ["zpravodaj-2000-05-ocr.md", "zpravodaj-2000-05-ocr.pdf"]
     assert (export["strategy"], export["attempts"], export["findings"]) == (
         "glyphless", [{"strategy": "glyphless", "findings": 0}], [])
     assert "Verification found nothing" in workflow.report_summary(project["id"])

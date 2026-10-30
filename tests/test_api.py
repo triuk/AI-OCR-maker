@@ -241,8 +241,11 @@ def test_the_exported_ocr_pdf_is_listed_and_downloaded_under_a_name_derived_from
     client.post(f"{base}/run")
     workflow.wait(project["id"])
 
-    [output] = client.get(f"{base}/outputs").json()["outputs"]
-    assert output["name"] == "zpravodaj-2000-05-ocr.pdf"
+    markdown, output = client.get(f"{base}/outputs").json()["outputs"]
+    assert (markdown["name"], output["name"]) == ("zpravodaj-2000-05-ocr.md", "zpravodaj-2000-05-ocr.pdf")
+    text = client.get(f"{base}/outputs/zpravodaj-2000-05-ocr.md")
+    assert text.headers["content-type"].startswith("text/markdown")
+    assert text.text.startswith('---\nsource: "zpravodaj-2000-05.pdf"\n')
     download = client.get(f"{base}/outputs/zpravodaj-2000-05-ocr.pdf")
     assert (download.status_code, download.headers["content-type"]) == (200, "application/pdf")
     assert 'filename="zpravodaj-2000-05-ocr.pdf"' in download.headers["content-disposition"]

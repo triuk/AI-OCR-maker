@@ -41,6 +41,6 @@ def test_a_real_scan_goes_through_the_workflow_into_a_verified_ocr_pdf_and_a_run
     pages = report["sections"]["ocr"]["pages"]
     assert len(pages) == project["source"]["pages"]
     assert report["sections"]["ocr"]["words"] > 0
-    [output] = workflow.outputs(project["id"])
+    [output] = [item for item in workflow.outputs(project["id"]) if item["name"].endswith(".pdf")]
     with pymupdf.open(workflow.output(project["id"], output["name"])) as document:
         assert sum(len(page.get_text("words")) for page in document) > 0

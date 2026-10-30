@@ -41,3 +41,6 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents
 - Optional slow smoke test on a real scan: `OCRMAKER_SMOKE_PDF=/path/scan.pdf .venv/bin/python -m pytest -q -m slow -s`.
 - Steps read the PDF through `ctx.source_pdf`: the clean working copy once an earlier OCR's invisible text layer
   was removed (`src/ocrmaker/existing_text.py`, `Workflow.remove_text_layer`), otherwise the source PDF copy.
+- Export also writes the article text Markdown (`<stem>-ocr.md`; format and hyphenation rules in
+  `src/ocrmaker/articletext.py`). Both outputs take every word's text from `ExportStep.exported_words`, the one
+  place where AI reconstructions and manual corrections must be applied.

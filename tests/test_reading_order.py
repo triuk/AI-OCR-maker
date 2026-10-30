@@ -30,7 +30,7 @@ def numbers_by_key(request, items) -> dict[str, int]:
 
 
 def extracted_words(workflow, project, page: int = 0) -> list[str]:
-    [output] = workflow.outputs(project["id"])
+    [output] = [item for item in workflow.outputs(project["id"]) if item["name"].endswith(".pdf")]
     with pymupdf.open(workflow.output(project["id"], output["name"])) as document:
         return [word[4] for word in document[page].get_text("words", sort=False)]
 

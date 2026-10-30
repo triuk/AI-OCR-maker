@@ -10,13 +10,20 @@ finds anything, the OCR PDF is assembled once more with the alternative text str
 (`textlayer.STRATEGIES`) and the attempt with fewer findings is kept. Remaining findings end the step as done
 with a warning; the files are written either way. `verification.json` holds
 {"strategy" (the one kept), "attempts": [{"strategy", "findings" (count)}], "findings": [...]}.
+
+Export also writes the article text Markdown next to the OCR PDF (format in `ocrmaker.articletext`), and
+`articletext.json` with its statistics: articles, ads, captions, printed page numbers, hyphen decisions and
+the front matter.
+
+Word text: both outputs take every word from `ExportStep.exported_words`, the one place where Export decides
+what a word says. AI reconstructions (#11) and manual corrections (#13, ADR 0004) are applied there.
 """
 from __future__ import annotations
 
 import time
 from pathlib import Path
 
-from .. import textlayer, verify
+from .. import articletext, textlayer, verify
 from ..layout import LAYOUT_STEP, read_layout_page
 from ..pages import PREPARED_STEP, read_pages
 from ..reading_order import ORDER_FILE, ORDER_STEP
@@ -26,6 +33,7 @@ from ..words import OCR_STEP, page_words, read_page
 OUTPUTS = "outputs"
 PLAN_FILE = "textlayer.json"
 VERIFICATION_FILE = "verification.json"
+ARTICLE_TEXT_FILE = "articletext.json"
 # Findings kept in one diagnostic record; the result keeps them all.
 RECORDED_FINDINGS = 200
 
@@ -33,11 +41,20 @@ RECORDED_FINDINGS = 200
 def output_names(source_name: str) -> dict[str, str]:
     """Output file names derived from the source PDF's file name."""
     stem = Path(source_name).stem or "dokument"
-    return {"pdf": f"{stem}-ocr.pdf"}
+    return {"pdf": f"{stem}-ocr.pdf", "markdown": f"{stem}-ocr.md"}
 
 
 class ExportStep(Step):
     id = "export"
+
+    def exported_words(self, ctx: StepContext, recognised: dict) -> dict[str, dict]:
+        """The words of one page as every output writes them: {word id: {"id", "text", "bbox"}}, recognition order.
+
+        This is the only place where Export takes a word's text, for the OCR PDF and the article text alike.
+        Today it is Local OCR's text. AI reconstruction (#11) replaces the text of reconstructed words (and may
+        add words of new boxes) and manual corrections (#13, ADR 0004) are applied last, both here.
+        """
+        return {word["id"]: {key: word[key] for key in ("id", "text", "bbox")} for word in page_words(recognised)}
 
     def text_layer_plan(self, ctx: StepContext, pages: list[dict]) -> list[dict]:
         """Per page, the lines of words in the order they are written: the reading order (articles, their
@@ -49,9 +66,9 @@ class ExportStep(Step):
         plan = []
         for page in pages:
             recognised = read_page(ocr, page["index"]) or {"lines": []}
-            words = {word["id"]: {key: word[key] for key in ("id", "text", "bbox")}
-                     for word in page_words(recognised)}
-            lines = [[words[word["id"]] for word in line["words"]] for line in recognised["lines"]]
+            words = self.exported_words(ctx, recognised)
+            lines = [[words[word["id"]] for word in line["words"] if word["id"] in words]
+                     for line in recognised["lines"]]
             if page["index"] in order_pages:
                 layout = read_layout_page(ctx.result(LAYOUT_STEP), page["index"]) or {"blocks": []}
                 blocks = {block["id"]: block for block in layout["blocks"]}
@@ -64,6 +81,70 @@ class ExportStep(Step):
                 lines = [line for line in lines if line] + ([rest] if rest else [])
             plan.append({"index": page["index"], "lines": lines})
         return plan
+
+    def article_pages(self, ctx: StepContext, pages: list[dict]) -> tuple[list[dict], list[dict]]:
+        """The pages' articles with their blocks' words (see articletext.render), and the cross-page links.
+
+        Without a reading order every page is one article of one block holding Tesseract's lines.
+        """
+        ocr = ctx.result(OCR_STEP)
+        ordered = ctx.has_result(LAYOUT_STEP) and ctx.has_result(ORDER_STEP)
+        order = ctx.result(ORDER_STEP).read_json(ORDER_FILE) if ordered else {}
+        order_pages = {item["index"]: item for item in order.get("pages", [])}
+        result = []
+        for page in pages:
+            index = page["index"]
+            recognised = read_page(ocr, index) or {"index": index, "lines": []}
+            words = self.exported_words(ctx, recognised)
+            fallback = [{"id": f"p{index + 1}-text", "kind": "article", "continues": None, "blocks": [
+                {"id": f"p{index + 1}-text", "kind": "body",
+                 "lines": [[words[word["id"]] for word in line["words"] if word["id"] in words]
+                           for line in recognised["lines"]]}]}]
+            if index not in order_pages:
+                result.append({"index": index, "articles": fallback})
+                continue
+            layout = read_layout_page(ctx.result(LAYOUT_STEP), index) or {"blocks": []}
+            blocks = {block["id"]: block for block in layout["blocks"]}
+            articles = [{**article, "blocks": [
+                {"id": block, "kind": blocks[block]["kind"],
+                 "lines": [[words[word] for word in line if word in words] for line in blocks[block]["lines"]]}
+                for block in article["blocks"]]} for article in order_pages[index]["articles"]]
+            # Words no block holds (there should be none) are not lost: they end the page as one more article.
+            placed = {word for block in layout["blocks"] for line in block["lines"] for word in line}
+            rest = [word for word in words.values() if word["id"] not in placed]
+            if rest:
+                articles.append({"id": f"p{index + 1}-rest", "kind": "article", "continues": None,
+                                 "blocks": [{"id": f"p{index + 1}-rest", "kind": "body", "lines": [rest]}]})
+            result.append({"index": index, "articles": articles})
+        return result, order.get("links", [])
+
+    def dictionary(self, ctx: StepContext):
+        """The dictionary deciding unclear line-end hyphens in the article text: known(word) -> bool, or None.
+
+        It is hunspell for the document language (ocrmaker.hunspell, brought by Problem detection) plus the
+        project dictionary setting, when they are available; without them the document's own words and the
+        typographic rules decide (articletext.join_hyphenated).
+        """
+        try:
+            from .. import hunspell
+        except ImportError:
+            return None
+        project = {word.lower() for word in ctx.settings.get("project_dictionary", [])}
+        try:
+            speller = hunspell.speller(ctx.settings["language"])
+        except Exception as exc:  # a missing dictionary must not stop the export
+            ctx.record("article_text_dictionary", error=str(exc))
+            return (lambda word: word.lower() in project) if project else None
+        return lambda word: word.lower() in project or bool(speller.lookup(word))
+
+    def write_article_text(self, ctx: StepContext, pages: list[dict], name: str) -> dict:
+        """Write the article text Markdown into the outputs; returns its statistics."""
+        article_pages, links = self.article_pages(ctx, pages)
+        text, stats = articletext.render(ctx.source_name, article_pages, links, self.dictionary(ctx))
+        ctx.output.write_bytes(f"{OUTPUTS}/{name}", text.encode("utf-8"))
+        stats = {"output": name, **stats}
+        ctx.output.write_json(ARTICLE_TEXT_FILE, stats)
+        return stats
 
     def assemble(self, source: Path, target: Path, pages: list[dict], strategy: str) -> None:
         """Write the OCR PDF with one text strategy (see textlayer.write_ocr_pdf for pages)."""
@@ -79,7 +160,11 @@ class ExportStep(Step):
         verification = self._write_verified(ctx, ctx.output.path(f"{OUTPUTS}/{name}"), layer)
         ctx.output.write_json(PLAN_FILE, {"pages": plan})
         ctx.output.write_json(VERIFICATION_FILE, verification)
-        ctx.record("export", outputs=[name], pages=len(plan),
+        ctx.checkpoint()
+        markdown = output_names(ctx.source_name)["markdown"]
+        stats = self.write_article_text(ctx, pages, markdown)
+        ctx.record("article_text", **stats)
+        ctx.record("export", outputs=[name, markdown], pages=len(plan),
                    words=sum(len(line) for item in plan for line in item["lines"]),
                    strategy=verification["strategy"], findings=len(verification["findings"]),
                    seconds=round(time.monotonic() - started, 3))
@@ -161,9 +246,23 @@ class ExportStep(Step):
                         for finding in findings[:REPORTED_FINDINGS]]
             if len(findings) > REPORTED_FINDINGS:
                 summary.append(f"- and {len(findings) - REPORTED_FINDINGS} more (see the report JSON)")
-        return ReportSection("Export", {"outputs": outputs, "strategy": verification["strategy"],
-                                        "attempts": verification["attempts"], "counts": counts,
-                                        "findings": findings}, summary)
+        data = {"outputs": outputs, "strategy": verification["strategy"], "attempts": verification["attempts"],
+                "counts": counts, "findings": findings}
+        if result.exists(ARTICLE_TEXT_FILE):
+            data["article_text"] = stats = result.read_json(ARTICLE_TEXT_FILE)
+            summary += ["", _article_text_summary(stats)]
+        return ReportSection("Export", data, summary)
+
+
+def _article_text_summary(stats: dict) -> str:
+    def counted(count: int, noun: str) -> str:
+        return f"{count} {noun}{'' if count == 1 else 's'}"
+    printed = stats["printed_pages"]
+    found = sum(number is not None for number in printed)
+    return (f"Article text {stats.get('output', 'Markdown')}: {counted(stats['articles'], 'article')}, "
+            f"{counted(stats['ads'], 'ad')}, {counted(stats['captions'], 'caption')}; printed page numbers found on "
+            f"{found} of {len(printed)} pages; line-end hyphens: {stats['hyphens']['joined']} joined, "
+            f"{stats['hyphens']['kept']} kept as genuine.")
 
 
 # Findings listed one by one in the human summary; the report JSON has them all.
