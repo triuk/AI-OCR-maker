@@ -30,3 +30,9 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents
 - AI requests go through `ctx.language.ask(...)` (`src/ocrmaker/language.py`); the CLIs are found on PATH or through
   `OCRMAKER_CLAUDE` / `OCRMAKER_CODEX`. Seam 1 tests script the AI with `tests/fakes.py::ScriptedProvider`
   (the `language_provider` fixture).
+- Every workflow operation writes a run report (`src/ocrmaker/report.py`): `<project>/reports/<run id>.json` plus a
+  Markdown summary. A step adds its metrics by overriding `Step.report(result)` and returning a `ReportSection`
+  (`src/ocrmaker/step.py`); see the `report.py` docstring for the format. AI requests are summarised from diagnostics.
+- Export verifies the OCR PDF it wrote (`src/ocrmaker/verify.py`) and retries once with the alternative text
+  strategy (`textlayer.STRATEGIES`); tests break the assembly with `tests/fakes.py::BrokenExport`.
+- Optional slow smoke test on a real scan: `OCRMAKER_SMOKE_PDF=/path/scan.pdf .venv/bin/python -m pytest -q -m slow -s`.

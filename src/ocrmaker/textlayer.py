@@ -15,6 +15,13 @@ to its text, so any text (Czech diacritics included) copies exactly as it was st
 the page as displayed (upright), at the height of its word box with its baseline on the box's bottom edge,
 and horizontally scaled (Tz) to the box's width. Words of one line are separated by a space; a line ends
 without one. Line-end hyphenation stays as the words carry it.
+
+Two text strategies differ only in how characters are encoded; Export tries the second when verification
+of the first finds problems (`STRATEGIES`):
+    "glyphless"  character ids allocated per document in order of first use, as Tesseract does;
+    "unicode"    the character id is the character's own code point (Basic Multilingual Plane; anything
+                 beyond it becomes U+FFFD), so the text still copies when a reader ignores or loses the
+                 ToUnicode map.
 """
 from __future__ import annotations
 
@@ -29,6 +36,8 @@ from .pages import apply_rect, display_matrix, display_size, invert, multiply, t
 FONT_NAME = "OcrText"
 GLYPH_ADVANCE = 500  # of 1000 units per em; every character has this width
 UNITS_PER_EM = 1000
+# Text strategies, the default first (see the module docstring).
+STRATEGIES = ("glyphless", "unicode")
 
 
 def _table_checksum(data: bytes) -> int:
@@ -76,8 +85,11 @@ def glyphless_font() -> bytes:
 class _Font:
     """The document's glyphless text font; character ids are allocated as words are encoded."""
 
-    def __init__(self, document: pymupdf.Document):
+    def __init__(self, document: pymupdf.Document, strategy: str = STRATEGIES[0]):
+        if strategy not in STRATEGIES:
+            raise ValueError(f"Unknown text strategy: {strategy!r}")
         self.document = document
+        self.strategy = strategy
         self.ids: dict[str, int] = {}
         self.xref = self._new_object("<< >>")
 
@@ -90,11 +102,18 @@ class _Font:
 
     def encode(self, text: str) -> str:
         """The hex string of a text's character ids (one per Unicode character)."""
-        return "".join(f"{self.ids.setdefault(char, len(self.ids) + 1):04X}" for char in text)
+        return "".join(f"{self._id(char):04X}" for char in text)
+
+    def _id(self, char: str) -> int:
+        if self.strategy == "glyphless":
+            return self.ids.setdefault(char, len(self.ids) + 1)
+        if ord(char) >= 0xFFFF or 0xD800 <= ord(char) <= 0xDFFF:  # no two-byte code of its own
+            char = "\ufffd"
+        return self.ids.setdefault(char, ord(char))
 
     def finish(self) -> None:
         """Write the font objects once every word is encoded: the ToUnicode map needs all characters."""
-        top = len(self.ids)
+        top = max(self.ids.values(), default=0)
         if top >= 0xFFFF:
             raise ValueError("Too many distinct characters for one text font")
         program = glyphless_font()
@@ -197,14 +216,15 @@ def _wrap_contents(document: pymupdf.Document, page: pymupdf.Page, before: bytes
     document.xref_set_key(page.xref, "Contents", f"[{streams[0]} {' '.join(own)} {streams[1]}]")
 
 
-def write_ocr_pdf(source: Path, target: Path, pages: list[dict]) -> None:
+def write_ocr_pdf(source: Path, target: Path, pages: list[dict], *, strategy: str = STRATEGIES[0]) -> None:
     """Write the OCR PDF: the source PDF with each listed page's words added as an invisible text layer.
 
     Each item of pages is {"page": <prepared page geometry, see ocrmaker.pages>, "lines": [[word, ...], ...]},
     lines in the order the text layer is written, each word {"text", "bbox"} in source page coordinates.
+    strategy is one of STRATEGIES.
     """
     with pymupdf.open(source) as document:
-        font = _Font(document)
+        font = _Font(document, strategy)
         for item in pages:
             page_geometry = item["page"]
             page = document[page_geometry["index"]]

@@ -4,12 +4,16 @@ from __future__ import annotations
 import copy
 import json
 import threading
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
+
+import pymupdf
 
 from ocrmaker.errors import StepError
 from ocrmaker.language import Completion, LanguageProvider, Request
 from ocrmaker.step import Step
+from ocrmaker.steps.export_step import ExportStep
 from ocrmaker.steps.prepare_step import PrepareStep
 
 
@@ -138,3 +142,41 @@ class ScriptedProvider(LanguageProvider):
             raise answer
         text = answer if isinstance(answer, str) else json.dumps(answer, ensure_ascii=False)
         return Completion(text=text, usage=copy.deepcopy(self.usage), usage_source="scripted", model=model)
+
+
+class BrokenExport(ExportStep):
+    """Export whose text layer assembly is deliberately broken, so that export verification has to catch it.
+
+    breakage: "outside_box" sets the first word 150 pt to the right of its box, "order" writes the first two
+    words of the first line swapped, "diacritics" writes every word without its diacritics, and
+    "to_unicode" drops the font's ToUnicode map from the written PDF. strategies limits the breakage to
+    those text layer strategies (all of them by default); the planned text layer itself stays intact.
+    """
+
+    def __init__(self, breakage: str, strategies: tuple[str, ...] | None = None):
+        self.breakage = breakage
+        self.broken_strategies = strategies
+
+    def assemble(self, source, target, pages, strategy):
+        if self.broken_strategies is not None and strategy not in self.broken_strategies:
+            return super().assemble(source, target, pages, strategy)
+        pages = copy.deepcopy(pages)
+        lines = pages[0]["lines"]
+        if self.breakage == "outside_box":
+            word = lines[0][0]
+            word["bbox"] = [word["bbox"][0] + 150, word["bbox"][1], word["bbox"][2] + 150, word["bbox"][3]]
+        elif self.breakage == "order":
+            lines[0][0], lines[0][1] = lines[0][1], lines[0][0]
+        elif self.breakage == "diacritics":
+            for item in pages:
+                for line in item["lines"]:
+                    for word in line:
+                        word["text"] = "".join(char for char in unicodedata.normalize("NFD", word["text"])
+                                               if not unicodedata.combining(char))
+        super().assemble(source, target, pages, strategy)
+        if self.breakage == "to_unicode":
+            with pymupdf.open(target) as document:
+                for xref in range(1, document.xref_length()):
+                    if document.xref_get_key(xref, "ToUnicode")[0] != "null":
+                        document.xref_set_key(xref, "ToUnicode", "null")
+                document.saveIncr()

@@ -177,3 +177,5 @@ dialog::backdrop { background: #12232f55; backdrop-filter: blur(3px); }
 .output-link span { color: var(--muted); font-weight: 400; font-size: 12px; }
 .export-word { fill: #1c7ed61f; stroke: #1c7ed6; stroke-width: 1; }
 .legend-item i.export-word { border-color: #1c7ed6; background: #1c7ed61f; }
+.export-word.export-finding { fill: #e8590c40; stroke: #d9480f; stroke-width: 2.5; }
+.legend-item i.export-finding { border-color: #d9480f; background: #e8590c40; }

@@ -290,3 +290,23 @@ def test_check_ai_shows_who_answered_or_why_not(client, source_pdf, language_pro
     assert limited | {"ok": False, "code": "usage_limit", "message": "Limit předplatného Claude je vyčerpaný."} == limited
     records = client.get(f"/api/projects/{project['id']}/diagnostics").json()["records"]
     assert [r["outcome"] for r in records if r["kind"] == "ai_request"] == ["ok", "failed"]
+
+
+def test_the_run_report_and_its_summary_are_served_after_a_run(library, source_pdf):
+    workflow, client = api_for(library, RecordingStep("import"))
+    project = upload(client, source_pdf).json()
+    base = f"/api/projects/{project['id']}"
+    missing = client.get(f"{base}/report")
+    assert (missing.status_code, missing.json()["detail"]) == (404, "Zpráva o běhu zatím neexistuje.")
+
+    client.post(f"{base}/run")
+    workflow.wait(project["id"])
+
+    report = client.get(f"{base}/report").json()
+    assert report["run"]["operation"] == "run"
+    assert [run["id"] for run in client.get(f"{base}/reports").json()["reports"]] == [report["run"]["id"]]
+    assert client.get(f"{base}/report", params={"run_id": report["run"]["id"]}).json() == report
+    summary = client.get(f"{base}/report/summary", headers={"X-Ocrmaker-Token": ""}, params={"token": TOKEN})
+    assert summary.status_code == 200
+    assert summary.headers["content-type"].startswith("text/plain; charset=utf-8")
+    assert summary.text.startswith("# Run report: zpravodaj-2000-05")

@@ -14,7 +14,7 @@ import traceback
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from . import providers
+from . import providers, report
 from . import settings as project_settings
 from .diagnostics import Diagnostics, new_run_id
 from .errors import Conflict, ConfirmationRequired, StepError, StepInterrupted
@@ -106,11 +106,11 @@ class Workflow:
 
     def run(self, project_id: str) -> dict:
         """Run the automatic steps that are not finished yet, up to the first manual step (manual review)."""
-        return self._operate(project_id, self._plan_run(project_id))
+        return self._operate(project_id, self._plan_run(project_id), operation="run")
 
     def export(self, project_id: str) -> dict:
         """Run manual review's closing work and every step after it (Export), always anew."""
-        return self._operate(project_id, self._plan_export(project_id))
+        return self._operate(project_id, self._plan_export(project_id), operation="export")
 
     def rerun(self, project_id: str, step_id: str, *, discard_corrections: int | None = None) -> dict:
         """Invalidate a step and every later step, then run again from it.
@@ -118,7 +118,8 @@ class Workflow:
         If manual corrections would be discarded, their count must be passed as discard_corrections,
         otherwise ConfirmationRequired is raised and nothing changes.
         """
-        return self._operate(project_id, self._plan_rerun(project_id, step_id, discard_corrections))
+        return self._operate(project_id, self._plan_rerun(project_id, step_id, discard_corrections),
+                             operation="rerun")
 
     def start(self, project_id: str, operation: str = "run", **options) -> dict:
         """Start run, export or rerun (with step_id, discard_corrections) in the background.
@@ -128,7 +129,8 @@ class Workflow:
         plans = {"run": self._plan_run, "export": self._plan_export, "rerun": self._plan_rerun}
         if operation not in plans:
             raise ValueError("Neznámá operace pracovního postupu.")
-        return self._operate(project_id, plans[operation](project_id, **options), background=True)
+        return self._operate(project_id, plans[operation](project_id, **options), background=True,
+                             operation=operation)
 
     def stop(self, project_id: str) -> bool:
         """Ask a running operation to stop at the step's next checkpoint; False when nothing runs."""
@@ -220,6 +222,22 @@ class Workflow:
         self.store.get(project_id)
         return Diagnostics(self.store.diagnostics_dir(project_id)).records(run_id)
 
+    def report(self, project_id: str, run_id: str | None = None) -> dict | None:
+        """The run report (see ocrmaker.report) of a run, by default the latest one; None when there is none."""
+        self.store.get(project_id)
+        return report.read(self._reports(project_id).path(run_id, ".json"))
+
+    def report_summary(self, project_id: str, run_id: str | None = None) -> str | None:
+        """The human summary (Markdown) of a run report, by default the latest one."""
+        self.store.get(project_id)
+        path = self._reports(project_id).path(run_id, ".md")
+        return path.read_text(encoding="utf-8") if path else None
+
+    def reports(self, project_id: str) -> list[dict]:
+        """The project's run reports, oldest first: [{"id": run id}]."""
+        self.store.get(project_id)
+        return [{"id": run_id} for run_id in self._reports(project_id).run_ids()]
+
     # AI ----------------------------------------------------------------------------------------------
 
     def check_ai(self, project_id: str, changes: dict | None = None) -> dict:
@@ -290,12 +308,13 @@ class Workflow:
     # Execution ---------------------------------------------------------------------------------------
 
     def _operate(self, project_id: str, work: Callable[[str, threading.Event], None], *,
-                 background: bool = False) -> dict:
+                 background: bool = False, operation: str = "run") -> dict:
         lock = self._lock(project_id)
         stop = threading.Event()
         run_id = new_run_id()
 
         def execute():
+            started, clock = now(), time.monotonic()
             try:
                 work(run_id, stop)
             except Exception:  # noqa: BLE001 - a background thread has nobody else to report to
@@ -303,6 +322,8 @@ class Workflow:
                     raise
                 traceback.print_exc(file=sys.stderr)
             finally:
+                self._write_report(project_id, {"id": run_id, "operation": operation, "started": started,
+                                                "finished": now(), "duration": round(time.monotonic() - clock, 3)})
                 with self._active_lock:
                     self._active.pop(project_id, None)
                 lock.release()
@@ -401,6 +422,20 @@ class Workflow:
                            duration=duration, outcome=outcome, message=message, warnings=context.warnings,
                            **({"error": error} if error else {}))
         return state
+
+    def _reports(self, project_id: str) -> report.RunReports:
+        return report.RunReports(self.store.directory(project_id) / report.REPORTS)
+
+    def _write_report(self, project_id: str, run: dict) -> None:
+        """Write the run report of an operation that ended; a failure here never fails the operation."""
+        diagnostics = Diagnostics(self.store.diagnostics_dir(project_id))
+        try:
+            content, summary = report.build(self.store.get(project_id), run, diagnostics, self.steps,
+                                            lambda step_id: self.result(project_id, step_id))
+            self._reports(project_id).write(content, summary)
+        except Exception:  # noqa: BLE001 - the run's results matter more than its report
+            diagnostics.record(run["id"], "report_failed", error=traceback.format_exc())
+            traceback.print_exc(file=sys.stderr)
 
     def _invalidate(self, project_id: str, step_ids) -> None:
         for step_id in step_ids:
