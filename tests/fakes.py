@@ -1,9 +1,14 @@
-"""Stand-ins for workflow steps (and, once AI steps exist, the scripted language provider)."""
+"""Stand-ins for workflow steps and the scripted language provider that replaces the AI in seam 1 tests."""
 from __future__ import annotations
 
+import copy
+import json
 import threading
+from dataclasses import dataclass
+from pathlib import Path
 
 from ocrmaker.errors import StepError
+from ocrmaker.language import Completion, LanguageProvider, Request
 from ocrmaker.step import Step
 from ocrmaker.steps.prepare_step import PrepareStep
 
@@ -61,3 +66,75 @@ class TransformingPrepare(PrepareStep):
 
     def prepare_page(self, page, raster, ctx):
         return {**page, "transform": {"rotate": self.rotate, "crop": self.crop}}
+
+
+# What a scripted request reports unless the test says otherwise; usage=None reports unknown usage.
+SCRIPTED_USAGE = {"input": 1200, "cached_input": 1000, "output": 80, "reasoning": None}
+
+
+@dataclass
+class ScriptedRequest:
+    """One request the scripted provider received; images are kept as bytes, their files may be gone later."""
+    purpose: str
+    instructions: str
+    data: object
+    schema: dict | None
+    images: list[bytes]
+    web_search: bool
+    model: str | None
+
+
+class ScriptedProvider(LanguageProvider):
+    """The AI stand-in of seam 1 tests: deterministic answers per request purpose, for every provider name.
+
+    Only the connection is scripted. The session around it is the real one, so requests are recorded in
+    diagnostics and JSON answers are parsed exactly as with Claude or Codex.
+
+    Script answers with `on(purpose, *answers)`. An answer is a dict or list (sent as JSON text), a str (raw
+    text, e.g. invalid JSON), an exception instance (raised, e.g. LanguageError(..., code=USAGE_LIMIT)), or a
+    callable taking the ScriptedRequest and returning any of these. Several answers are used in turn and the
+    last one keeps answering. A purpose without an answer fails the test loudly (AssertionError).
+    """
+
+    name = "scripted"
+    label = "Scripted"
+
+    def __init__(self, answers: dict | None = None, *, usage: dict | None = SCRIPTED_USAGE,
+                 model: str = "scripted-model"):
+        self.answers = {purpose: [answer] for purpose, answer in (answers or {}).items()}
+        self.usage = usage
+        self.model = model
+        self.requests: list[ScriptedRequest] = []
+        self._lock = threading.Lock()
+
+    def on(self, purpose: str, *answers) -> "ScriptedProvider":
+        with self._lock:
+            self.answers[purpose] = list(answers)
+        return self
+
+    def requests_for(self, purpose: str) -> list[ScriptedRequest]:
+        return [request for request in self.requests if request.purpose == purpose]
+
+    def models(self) -> list[dict]:
+        return [{"id": self.model, "label": self.model}]
+
+    def default_model(self) -> str:
+        return self.model
+
+    def complete(self, request: Request, *, model, stopped) -> Completion:
+        scripted = ScriptedRequest(purpose=request.purpose, instructions=request.instructions,
+                                   data=copy.deepcopy(request.data), schema=request.schema,
+                                   images=[Path(image).read_bytes() for image in request.images],
+                                   web_search=request.web_search, model=model)
+        with self._lock:
+            self.requests.append(scripted)
+            queue = self.answers.get(request.purpose)
+            if not queue:
+                raise AssertionError(f"The scripted provider has no answer for purpose {request.purpose!r}.")
+            answer = queue.pop(0) if len(queue) > 1 else queue[0]
+        if callable(answer) and not isinstance(answer, type):
+            answer = answer(scripted)
+        if isinstance(answer, BaseException):
+            raise answer
+        text = answer if isinstance(answer, str) else json.dumps(answer, ensure_ascii=False)
+        return Completion(text=text, usage=copy.deepcopy(self.usage), usage_source="scripted", model=model)

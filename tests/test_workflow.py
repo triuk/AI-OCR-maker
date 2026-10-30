@@ -5,7 +5,7 @@ import threading
 
 import pytest
 
-from fakes import BlockingStep, RecordingStep
+from fakes import BlockingStep, RecordingStep, ScriptedProvider
 from ocrmaker.errors import ConfirmationRequired, Conflict
 from ocrmaker.store import ProjectStore
 from ocrmaker.workflow import Workflow
@@ -302,12 +302,13 @@ def test_steps_receive_the_project_settings_and_the_language_provider(make_workf
 
     class Probe(RecordingStep):
         def run(self, ctx):
-            seen.update(language=ctx.settings["language"], provider=ctx.language)
+            seen.update(language=ctx.settings["language"], answer=ctx.language.ask("Say hi.", purpose="probe").text)
             super().run(ctx)
 
-    provider = object()
+    provider = ScriptedProvider().on("probe", "hi")
     workflow = make_workflow(Probe("import"), language=provider)
     project = workflow.create(source_pdf, settings={"language": "eng"})
     workflow.run(project["id"])
 
-    assert seen == {"language": "eng", "provider": provider}
+    assert seen == {"language": "eng", "answer": "hi"}
+    assert [request.purpose for request in provider.requests] == ["probe"]

@@ -12,6 +12,7 @@ from pathlib import Path
 
 import uvicorn
 
+from . import providers
 from .api import create_api
 from .files import write_json_atomic
 from .locking import FileLock
@@ -80,7 +81,7 @@ def main(argv: list[str] | None = None) -> None:
             webbrowser.open(url)
         parser.exit(0, f"Aplikace už běží: {url or 'adresa není známa'}\n")
     try:
-        workflow = Workflow(ProjectStore(library))
+        workflow = Workflow(ProjectStore(library), language=providers.available())
         listener = listen_socket(DEFAULT_PORT if args.port is None else args.port, fallback=args.port is None)
         url = f"http://127.0.0.1:{listener.getsockname()[1]}/"
         control = Control()

@@ -257,3 +257,36 @@ def test_the_listing_offers_previews_of_local_ocr_and_export(client):
 
     assert previews["ocr"] is True and previews["export"] is True
     assert "confidence" in client.get("/previews/ocr.js").text
+
+
+def test_project_settings_offer_claude_or_codex_and_their_models(client, source_pdf):
+    project = upload(client, source_pdf).json()
+    choices = client.get("/api/projects").json()["choices"]
+    assert [provider["id"] for provider in choices["ai_provider"]] == ["claude", "codex"]
+    assert {"id": "opus", "label": "Opus"} in choices["ai_model"]["claude"]
+    assert choices["ai_model"]["codex"]
+
+    settings = f"/api/projects/{project['id']}/settings"
+    saved = client.put(settings, json={"ai_provider": "claude", "ai_model": "opus"}).json()["settings"]
+    assert (saved["ai_provider"], saved["ai_model"]) == ("claude", "opus")
+    refused = client.put(settings, json={"ai_model": "gpt-unknown"})
+    assert refused.status_code == 422
+    assert refused.json()["detail"] == "Model „gpt-unknown“ není u poskytovatele Claude k dispozici."
+
+
+def test_check_ai_shows_who_answered_or_why_not(client, source_pdf, language_provider):
+    from ocrmaker.language import LanguageError
+
+    project = upload(client, source_pdf).json()
+    check = f"/api/projects/{project['id']}/ai-check"
+    language_provider.on("check", {"ok": True}, LanguageError("Limit předplatného Claude je vyčerpaný.",
+                                                               code="usage_limit"))
+
+    answered = client.post(check, json={"ai_model": "haiku"}).json()
+    limited = client.post(check).json()
+
+    assert answered | {"ok": True, "provider": "claude", "model": "haiku"} == answered
+    assert answered["message"] == "Claude odpověděl (model haiku)."
+    assert limited | {"ok": False, "code": "usage_limit", "message": "Limit předplatného Claude je vyčerpaný."} == limited
+    records = client.get(f"/api/projects/{project['id']}/diagnostics").json()["records"]
+    assert [r["outcome"] for r in records if r["kind"] == "ai_request"] == ["ok", "failed"]
