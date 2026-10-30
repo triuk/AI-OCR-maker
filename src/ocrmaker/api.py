@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import settings as project_settings
@@ -110,6 +110,11 @@ def create_api(workflow: Workflow, *, token: str | None = None, control=None) ->
     def run(project_id: str):
         return workflow.start(project_id, "run")
 
+    @app.post("/api/projects/{project_id}/text-layer/remove", status_code=202)
+    def remove_text_layer(project_id: str):
+        """The choice Import's stop offers for an earlier OCR's invisible text layer; visible text gets 422."""
+        return workflow.start(project_id, "remove_text_layer")
+
     @app.post("/api/projects/{project_id}/export", status_code=202)
     def export(project_id: str):
         return workflow.start(project_id, "export")
@@ -154,6 +159,27 @@ def create_api(workflow: Workflow, *, token: str | None = None, control=None) ->
         """Download one exported file (also with ?token= for a plain link)."""
         path = workflow.output(project_id, name)
         return FileResponse(path, media_type="application/pdf" if name.endswith(".pdf") else None, filename=name)
+
+    @app.get("/api/projects/{project_id}/reports")
+    def reports(project_id: str):
+        """The project's run reports, oldest first."""
+        return {"reports": workflow.reports(project_id)}
+
+    @app.get("/api/projects/{project_id}/report")
+    def report(project_id: str, run_id: str | None = None):
+        """A run report as JSON (ocrmaker.report), by default the latest run's."""
+        content = workflow.report(project_id, run_id)
+        if content is None:
+            raise KeyError("Zpráva o běhu zatím neexistuje.")
+        return content
+
+    @app.get("/api/projects/{project_id}/report/summary")
+    def report_summary(project_id: str, run_id: str | None = None):
+        """The human summary of a run report (Markdown shown as plain text; also with ?token= for a link)."""
+        summary = workflow.report_summary(project_id, run_id)
+        if summary is None:
+            raise KeyError("Zpráva o běhu zatím neexistuje.")
+        return PlainTextResponse(summary)
 
     @app.get("/api/projects/{project_id}/diagnostics")
     def diagnostics(project_id: str, run_id: str | None = None):

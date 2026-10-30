@@ -35,8 +35,12 @@ def step_implementations():
 
 @pytest.fixture
 def language_provider():
-    """The AI stand-in for every provider name; script answers with language_provider.on(purpose, answer)."""
-    return ScriptedProvider()
+    """The AI stand-in for every provider name; script answers with language_provider.on(purpose, answer).
+
+    Reading order answers by default with Layout's geometric numbering, as one article.
+    """
+    return ScriptedProvider().on("reading_order", lambda request: {"articles": [
+        {"kind": "article", "blocks": [block["number"] for block in request.data["blocks"]], "continues": None}]})
 
 
 @pytest.fixture

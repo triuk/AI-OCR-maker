@@ -3,6 +3,7 @@
 Layout of `<root>/projects/<id>/`:
     project.json          the project document (name, source facts, settings, step states)
     source.pdf            a read-only copy of the user's source PDF
+    working.pdf           the clean working copy, once an earlier OCR's text layer was removed (read-only)
     steps/<step id>/      the committed result of each step (see ocrmaker.step.StepResult)
     corrections.json      manual corrections, a separate layer applied at export (ADR 0004)
     diagnostics/<run>.jsonl  diagnostic records of one workflow run
@@ -11,6 +12,7 @@ Layout of `<root>/projects/<id>/`:
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 import stat
 import threading
@@ -24,6 +26,7 @@ from .locking import FileLock
 
 PROJECT_FILE = "project.json"
 SOURCE_FILE = "source.pdf"
+WORKING_FILE = "working.pdf"
 
 
 def now() -> str:
@@ -46,6 +49,8 @@ class ProjectStore:
         for leftover in self.projects.glob("*/steps/.*"):
             if leftover.is_dir():
                 shutil.rmtree(leftover, ignore_errors=True)
+        for leftover in self.projects.glob("*/.working-*"):
+            leftover.unlink(missing_ok=True)
 
     # Paths -------------------------------------------------------------------------------------------
 
@@ -58,6 +63,25 @@ class ProjectStore:
 
     def source_pdf(self, project_id: str) -> Path:
         return self.directory(project_id) / SOURCE_FILE
+
+    def base_pdf(self, project_id: str) -> Path:
+        """The PDF the workflow works from: the clean working copy once there is one, else the source copy."""
+        working = self.directory(project_id) / WORKING_FILE
+        return working if working.is_file() else self.source_pdf(project_id)
+
+    def write_working_pdf(self, project_id: str, write: Callable[[Path], object]):
+        """Create the clean working copy: write(path) fills a staged file that then replaces it atomically."""
+        directory = self.directory(project_id)
+        staged = directory / f".working-{uuid.uuid4().hex}.pdf"
+        try:
+            outcome = write(staged)
+            with staged.open("rb") as written:
+                os.fsync(written.fileno())
+            staged.chmod(stat.S_IRUSR | stat.S_IRGRP)
+            staged.replace(directory / WORKING_FILE)
+        finally:
+            staged.unlink(missing_ok=True)
+        return outcome
 
     def run_lock(self, project_id: str) -> FileLock:
         return FileLock(self.directory(project_id) / ".run.lock", "Projekt právě zpracovává jiný běh.")

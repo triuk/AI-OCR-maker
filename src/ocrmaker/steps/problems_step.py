@@ -30,7 +30,7 @@ from collections import Counter
 from .. import hunspell
 from ..pages import PREPARED_STEP, read_pages
 from ..problems import DOUBTFUL, KINDS, THRESHOLDS, UNREADABLE, detect
-from ..step import Step, StepContext, StepResult
+from ..step import ReportSection, Step, StepContext, StepResult
 from ..words import OCR_STEP, page_file, read_page
 
 PROBLEMS_FILE = "problems.json"
@@ -98,5 +98,26 @@ class ProblemsStep(Step):
         spots = result.read_json(name)["spots"]
         return {"spots": spots, "counts": {kind: sum(1 for spot in spots if spot["kind"] == kind) for kind in KINDS}}
 
+    def report(self, result: StepResult) -> ReportSection:
+        """Problem spot counts by kind per page and in total, with the thresholds and dictionary used."""
+        problems = result.read_json(PROBLEMS_FILE)
+        pages = [{key: page[key] for key in ("index", UNREADABLE, DOUBTFUL)} for page in problems["pages"]]
+        total = problems["total"]
+        dictionary = problems["dictionary"]
+        thresholds = problems["thresholds"]
+        summary = [f"{total[UNREADABLE]} unreadable words and {total[DOUBTFUL]} doubtful readings; confidence "
+                   f"below {thresholds['problem_unreadable_confidence']} is unreadable, below "
+                   f"{thresholds['problem_doubtful_confidence']} doubtful; dictionary "
+                   + (f"{dictionary['hunspell']} plus {dictionary['project_words']} project words."
+                      if dictionary else "check skipped."), "",
+                   "| Page | Unreadable words | Doubtful readings |", "|---|---|---|"]
+        summary += [f"| {page['index'] + 1} | {page[UNREADABLE]} | {page[DOUBTFUL]} |" for page in pages
+                    if page[UNREADABLE] or page[DOUBTFUL]][:REPORTED_PAGES]
+        return ReportSection("Problem detection", {"thresholds": thresholds, "dictionary": dictionary,
+                                                   "total": total, "pages": pages}, summary)
+
+
+# The summary lists at most this many pages with problem spots; the report JSON has them all.
+REPORTED_PAGES = 40
 
 STEP = ProblemsStep()

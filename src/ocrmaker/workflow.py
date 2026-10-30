@@ -14,7 +14,7 @@ import traceback
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from . import providers
+from . import existing_text, providers, report
 from . import settings as project_settings
 from .diagnostics import Diagnostics, new_run_id
 from .errors import Conflict, ConfirmationRequired, StepError, StepInterrupted
@@ -28,6 +28,7 @@ from .store import ProjectStore, now
 
 PENDING, RUNNING, DONE, WARNING, FAILED = "pending", "running", "done", "warning", "failed"
 FINISHED = (DONE, WARNING)
+REMOVE_ACTION = existing_text.REMOVE_ACTION
 # Progress is written to the project document at most this often (seconds).
 PROGRESS_INTERVAL = 0.25
 # Manual corrections belong to the review; rerunning a step before it discards them (ADR 0004).
@@ -40,7 +41,7 @@ CHECK_SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "re
 
 def _pending_step() -> dict:
     return {"state": PENDING, "message": None, "started": None, "finished": None, "duration": None,
-            "run_id": None, "progress": None}
+            "run_id": None, "progress": None, "action": None}
 
 
 def _plural(count: int, one: str, few: str, many: str) -> str:
@@ -106,11 +107,11 @@ class Workflow:
 
     def run(self, project_id: str) -> dict:
         """Run the automatic steps that are not finished yet, up to the first manual step (manual review)."""
-        return self._operate(project_id, self._plan_run(project_id))
+        return self._operate(project_id, self._plan_run(project_id), operation="run")
 
     def export(self, project_id: str) -> dict:
         """Run manual review's closing work and every step after it (Export), always anew."""
-        return self._operate(project_id, self._plan_export(project_id))
+        return self._operate(project_id, self._plan_export(project_id), operation="export")
 
     def rerun(self, project_id: str, step_id: str, *, discard_corrections: int | None = None) -> dict:
         """Invalidate a step and every later step, then run again from it.
@@ -118,17 +119,28 @@ class Workflow:
         If manual corrections would be discarded, their count must be passed as discard_corrections,
         otherwise ConfirmationRequired is raised and nothing changes.
         """
-        return self._operate(project_id, self._plan_rerun(project_id, step_id, discard_corrections))
+        return self._operate(project_id, self._plan_rerun(project_id, step_id, discard_corrections),
+                             operation="rerun")
+
+    def remove_text_layer(self, project_id: str) -> dict:
+        """Remove an earlier OCR's invisible text layer into a clean working copy and run again from Import.
+
+        The clean copy becomes the base of every step and of the export (base_pdf); the source PDF stays as it
+        is. A PDF with visible text, or without any text layer, is refused (ValueError, Czech).
+        """
+        return self._operate(project_id, self._plan_remove_text_layer(project_id))
 
     def start(self, project_id: str, operation: str = "run", **options) -> dict:
-        """Start run, export or rerun (with step_id, discard_corrections) in the background.
+        """Start run, export, rerun (with step_id, discard_corrections) or remove_text_layer in the background.
 
         Refusals (a run in progress, a needed confirmation, nothing to run) are raised here, synchronously.
         """
-        plans = {"run": self._plan_run, "export": self._plan_export, "rerun": self._plan_rerun}
+        plans = {"run": self._plan_run, "export": self._plan_export, "rerun": self._plan_rerun,
+                 REMOVE_ACTION: self._plan_remove_text_layer}
         if operation not in plans:
             raise ValueError("Neznámá operace pracovního postupu.")
-        return self._operate(project_id, plans[operation](project_id, **options), background=True)
+        return self._operate(project_id, plans[operation](project_id, **options), background=True,
+                             operation=operation)
 
     def stop(self, project_id: str) -> bool:
         """Ask a running operation to stop at the step's next checkpoint; False when nothing runs."""
@@ -167,6 +179,11 @@ class Workflow:
         return {"corrections": corrections, "steps": list(STEP_IDS[index:])}
 
     # Results and diagnostics -------------------------------------------------------------------------
+
+    def base_pdf(self, project_id: str) -> Path:
+        """The PDF steps work from (ctx.source_pdf): the project's source copy, or its clean working copy."""
+        self.store.get(project_id)
+        return self.store.base_pdf(project_id)
 
     def result(self, project_id: str, step_id: str) -> StepResult | None:
         """The committed result of a finished step, or None."""
@@ -219,6 +236,22 @@ class Workflow:
     def diagnostics(self, project_id: str, run_id: str | None = None) -> list[dict]:
         self.store.get(project_id)
         return Diagnostics(self.store.diagnostics_dir(project_id)).records(run_id)
+
+    def report(self, project_id: str, run_id: str | None = None) -> dict | None:
+        """The run report (see ocrmaker.report) of a run, by default the latest one; None when there is none."""
+        self.store.get(project_id)
+        return report.read(self._reports(project_id).path(run_id, ".json"))
+
+    def report_summary(self, project_id: str, run_id: str | None = None) -> str | None:
+        """The human summary (Markdown) of a run report, by default the latest one."""
+        self.store.get(project_id)
+        path = self._reports(project_id).path(run_id, ".md")
+        return path.read_text(encoding="utf-8") if path else None
+
+    def reports(self, project_id: str) -> list[dict]:
+        """The project's run reports, oldest first: [{"id": run id}]."""
+        self.store.get(project_id)
+        return [{"id": run_id} for run_id in self._reports(project_id).run_ids()]
 
     # AI ----------------------------------------------------------------------------------------------
 
@@ -287,15 +320,46 @@ class Workflow:
                 self._run_sequence(project_id, run_id, stop, STEPS[FIRST_MANUAL:])
         return work
 
+    def _plan_remove_text_layer(self, project_id: str) -> Callable[[str, threading.Event], None]:
+        self.store.get(project_id)
+        layer = existing_text.survey_file(self.store.base_pdf(project_id))
+        if layer is None or layer["visible"]:
+            raise ValueError(existing_text.refusal_message(layer))
+        rerun = self._plan_rerun(project_id, PAGES_STEP)
+
+        def work(run_id, stop):
+            clock = time.monotonic()
+            diagnostics = Diagnostics(self.store.diagnostics_dir(project_id))
+            source = self.store.source_pdf(project_id)
+            facts = {"text_layer_pages": layer["pages"], "text_layer_words": layer["words"]}
+            try:
+                removed = self.store.write_working_pdf(project_id,
+                                                       lambda target: existing_text.remove(source, target))
+            except Exception as exc:  # noqa: BLE001 - the stop stays on Import, with the reason
+                message = str(exc) if isinstance(exc, ValueError) else \
+                    f"Odstranění textové vrstvy skončilo neočekávanou chybou: {exc}"
+                diagnostics.record(run_id, "text_layer_removal", outcome=FAILED, message=message,
+                                   error=traceback.format_exc(), **facts)
+                self.store.mutate(project_id, lambda document: document["steps"][PAGES_STEP].update(
+                    state=FAILED, message=message, action=None))
+                return
+            removal = {"pages": layer["pages"], "words": layer["words"], "created": now()}
+            self.store.mutate(project_id, lambda document: document.update(working_copy=removal))
+            diagnostics.record(run_id, "text_layer_removal", outcome="removed", images=removed["images"],
+                               seconds=round(time.monotonic() - clock, 3), **facts)
+            rerun(run_id, stop)
+        return work
+
     # Execution ---------------------------------------------------------------------------------------
 
     def _operate(self, project_id: str, work: Callable[[str, threading.Event], None], *,
-                 background: bool = False) -> dict:
+                 background: bool = False, operation: str = "run") -> dict:
         lock = self._lock(project_id)
         stop = threading.Event()
         run_id = new_run_id()
 
         def execute():
+            started, clock = now(), time.monotonic()
             try:
                 work(run_id, stop)
             except Exception:  # noqa: BLE001 - a background thread has nobody else to report to
@@ -303,6 +367,8 @@ class Workflow:
                     raise
                 traceback.print_exc(file=sys.stderr)
             finally:
+                self._write_report(project_id, {"id": run_id, "operation": operation, "started": started,
+                                                "finished": now(), "duration": round(time.monotonic() - clock, 3)})
                 with self._active_lock:
                     self._active.pop(project_id, None)
                 lock.release()
@@ -362,21 +428,21 @@ class Workflow:
         settings = project_settings.merged(document["settings"], {})
         context = StepContext(
             step_id=definition.id, project_id=project_id, run_id=run_id, settings=settings,
-            source_pdf=self.store.source_pdf(project_id), output=StepOutput(staging),
+            source_pdf=self.store.base_pdf(project_id), output=StepOutput(staging),
             language=LanguageSession(self.language, settings, stopped=stop.is_set,
                                      record=lambda kind, **data: diagnostics.record(run_id, kind, step=definition.id,
                                                                                      **data)),
             results=lambda step_id: self.result(project_id, step_id), progress=progress, stopped=stop.is_set,
             record=lambda kind, **data: diagnostics.record(run_id, kind, **data),
             source_name=document["source"]["file_name"])
-        error = None
+        error = action = None
         try:
             step.run(context)
             context.checkpoint()
         except StepInterrupted:
             outcome, state, message = "interrupted", PENDING, None
         except StepError as exc:
-            outcome, state, message = FAILED, FAILED, str(exc)
+            outcome, state, message, action = FAILED, FAILED, str(exc), exc.action
         except Exception as exc:  # noqa: BLE001 - any defect fails only this step, with a trace in diagnostics
             outcome, state = FAILED, FAILED
             message = f"Krok skončil neočekávanou chybou: {exc}"
@@ -391,7 +457,7 @@ class Workflow:
 
         def end(document):
             entry = document["steps"][definition.id]
-            entry.update(state=state, message=message, progress=None)
+            entry.update(state=state, message=message, progress=None, action=action)
             if state == PENDING:
                 entry.update(started=None, run_id=None)
             else:
@@ -401,6 +467,20 @@ class Workflow:
                            duration=duration, outcome=outcome, message=message, warnings=context.warnings,
                            **({"error": error} if error else {}))
         return state
+
+    def _reports(self, project_id: str) -> report.RunReports:
+        return report.RunReports(self.store.directory(project_id) / report.REPORTS)
+
+    def _write_report(self, project_id: str, run: dict) -> None:
+        """Write the run report of an operation that ended; a failure here never fails the operation."""
+        diagnostics = Diagnostics(self.store.diagnostics_dir(project_id))
+        try:
+            content, summary = report.build(self.store.get(project_id), run, diagnostics, self.steps,
+                                            lambda step_id: self.result(project_id, step_id))
+            self._reports(project_id).write(content, summary)
+        except Exception:  # noqa: BLE001 - the run's results matter more than its report
+            diagnostics.record(run["id"], "report_failed", error=traceback.format_exc())
+            traceback.print_exc(file=sys.stderr)
 
     def _invalidate(self, project_id: str, step_ids) -> None:
         for step_id in step_ids:

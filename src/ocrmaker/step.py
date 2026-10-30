@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 from .errors import StepError, StepInterrupted
@@ -70,6 +71,8 @@ class StepContext:
         self.project_id = project_id
         self.run_id = run_id
         self.settings = settings
+        # The PDF to work from and to build the OCR PDF on: the project's copy of the source PDF, or its clean
+        # working copy once an earlier OCR's text layer was removed. Read-only.
         self.source_pdf = source_pdf
         # The user's file name of the source PDF; output names derive from it.
         self.source_name = source_name
@@ -121,3 +124,23 @@ class Step:
     def overlay(self, result: StepResult, page: int) -> dict | None:
         """Step preview overlay data of one page. By default it is what the step stored with write_overlay."""
         return result.overlay(page)
+
+    def report(self, result: StepResult) -> ReportSection | None:
+        """This step's section of the run report, computed from its committed result; None adds none.
+
+        See ocrmaker.report for how sections end up in the report JSON and the human summary.
+        """
+        return None
+
+
+@dataclass
+class ReportSection:
+    """A step's contribution to the run report (English).
+
+    data goes into the report JSON as `sections[<step id>]`; keep it JSON-serialisable and put per-page
+    metrics in a "pages" list of {"index" (0-based), ...}. summary is a few Markdown lines for the human
+    summary, shown under a "## <title>" heading.
+    """
+    title: str
+    data: dict
+    summary: list[str] = field(default_factory=list)

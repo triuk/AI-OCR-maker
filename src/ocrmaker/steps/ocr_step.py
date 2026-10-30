@@ -9,7 +9,7 @@ import time
 from .. import inkgaps, tessdata, tesseract
 from ..errors import StepError
 from ..pages import PREPARED_STEP, read_pages
-from ..step import Step, StepContext, StepResult
+from ..step import ReportSection, Step, StepContext, StepResult
 from ..words import OCR_FILE, page_file, page_words, read_page
 
 
@@ -70,5 +70,34 @@ class OcrStep(Step):
                           for word in page_words(recognised)],
                 "lines": [line["bbox"] for line in recognised["lines"]]}
 
+    def report(self, result: StepResult) -> ReportSection:
+        """Word count and mean word confidence per page and for the document (weighted by words)."""
+        recognised = result.read_json(OCR_FILE)
+        pages = [{"index": page["index"], "words": page["words"], "empty_words": page.get("empty_words", 0),
+                  "mean_confidence": page["mean_confidence"]} for page in recognised["pages"]]
+        words = sum(page["words"] for page in pages)
+        mean = round(sum(page["words"] * page["mean_confidence"] for page in pages if page["words"]) / words, 2) \
+            if words else None
+        engine = recognised["engine"]
+        empty = sum(page["empty_words"] for page in pages)
+        summary = [f"{words} words on {len(pages)} pages, mean confidence {mean} "
+                   f"({engine['name']} {engine['version']}, {engine['language']}); "
+                   f"{empty} empty word boxes for ink without a reading.", ""]
+        shown = pages
+        if len(pages) > REPORTED_PAGES:  # pages without words first, then by rising confidence
+            shown = sorted(pages, key=lambda page: (page["mean_confidence"] is not None,
+                                                    page["mean_confidence"] or 0, page["index"]))
+            shown = shown[:REPORTED_PAGES // 2]
+            summary += [f"The {len(shown)} pages with the lowest mean confidence:", ""]
+        summary += ["| Page | Words | Mean confidence |", "|---|---|---|"]
+        for page in shown:
+            confidence = "" if page["mean_confidence"] is None else page["mean_confidence"]
+            summary.append(f"| {page['index'] + 1} | {page['words']} | {confidence} |")
+        return ReportSection("Local OCR", {"engine": engine, "words": words, "empty_words": empty,
+                                           "mean_confidence": mean, "pages": pages}, summary)
+
+
+# Up to this many pages the summary lists each page; above it only the weakest half of this number.
+REPORTED_PAGES = 20
 
 STEP = OcrStep()

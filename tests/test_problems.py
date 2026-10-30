@@ -55,6 +55,8 @@ def test_every_printed_word_in_the_blurred_binding_band_has_a_word_box(binding):
     assert empty, "Tesseract missed no word in the band, so the fixture tests nothing"
     # Missed words get empty word boxes; clean print outside the band never does.
     assert all(word["bbox"][0] < BAND for word in empty)
+    ocr_section = workflow.report(project["id"])["sections"]["ocr"]
+    assert ocr_section["pages"][0]["empty_words"] == len(empty)
     missed = [text for text, box in in_band
               if not any(overlap(box, word["bbox"]) > 0.3 for word in words if word["text"])]
     assert missed
@@ -213,7 +215,18 @@ TWO_PAGES = [[CLEAN, [("Rych4ald", 95.0), ("", 0.0), ("obec", 20.0)]],
              [[("Zbrdlíkov", 96.0), ("pŕíští", 95.0)], CLEAN]]
 
 
-def test_problem_spot_counts_by_kind_per_page_are_recorded_for_the_report(tmp_path):
+def test_the_report_counts_problem_spots_by_kind_per_page(tmp_path):
+    workflow, project = scripted(tmp_path, TWO_PAGES)
+
+    section = workflow.report(project["id"])["sections"]["problems"]
+    assert section["pages"] == [{"index": 0, "unreadable": 2, "doubtful": 1},
+                                {"index": 1, "unreadable": 0, "doubtful": 2}]
+    assert section["total"] == {"unreadable": 2, "doubtful": 3}
+    summary = workflow.report_summary(project["id"])
+    assert "## Problem detection" in summary and "| 1 | 2 | 1 |" in summary and "| 2 | 0 | 2 |" in summary
+
+
+def test_problem_spot_counts_are_kept_with_the_result_and_in_diagnostics(tmp_path):
     workflow, project = scripted(tmp_path, TWO_PAGES)
 
     summary = workflow.result(project["id"], "problems").read_json("problems.json")

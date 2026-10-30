@@ -15,7 +15,14 @@ class ConfirmationRequired(Conflict):
 
 
 class StepError(RuntimeError):
-    """A step failed for a reason the user can act on; earlier results stay intact."""
+    """A step failed for a reason the user can act on; earlier results stay intact.
+
+    action names a workflow operation the stop offers (e.g. "remove_text_layer"); it is kept in the step state.
+    """
+
+    def __init__(self, message: str, *, action: str | None = None):
+        super().__init__(message)
+        self.action = action
 
 
 class StepInterrupted(RuntimeError):

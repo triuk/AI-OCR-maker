@@ -9,7 +9,10 @@ and `run_id`. Kinds written so far:
                    response, usage {input, cached_input, output, reasoning, total, uncached_input} or null when
                    unknown (never 0), usage_source, model_reported, details, error, error_code, retry_at}
                   written by ocrmaker.language.LanguageSession for every AI request.
-Steps add their own kinds through StepContext.record.
+    report_failed {error} when the run report (ocrmaker.report) could not be written.
+Steps add their own kinds through StepContext.record, e.g. ocr_page, export and export_verification
+{strategy, findings (the first 200), counts {kind: n}, seconds}, one per text strategy tried.
+The run report summarises these records together with the step results.
 """
 from __future__ import annotations
 

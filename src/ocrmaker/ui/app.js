@@ -4,6 +4,8 @@ const $ = id => document.getElementById(id);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const STATE_LABELS = {pending: "Čeká", running: "Probíhá", done: "Hotovo", warning: "Hotovo s varováním", failed: "Selhalo"};
 const POLL_INTERVAL = 1500;
+// What a stopped step may offer (its state's "action"): the button label and the API operation it posts.
+const STEP_ACTIONS = {remove_text_layer: {label: "Odstranit textovou vrstvu a pokračovat", path: "text-layer/remove"}};
 let token = "", projects = [], steps = [], choices = {}, currentId = null, selectedStep = null;
 let refreshBusy = false, toastTimer;
 
@@ -89,7 +91,8 @@ function renderWorkspace() {
   $("projectName").textContent = p.name;
   $("projectState").textContent = status.label;
   $("projectState").className = "badge " + status.cls;
-  $("projectMeta").textContent = `${p.source.file_name} · ${p.source.pages} ${plural(p.source.pages, "strana", "strany", "stran")} · ${language ? language.label : p.settings.language}`;
+  $("projectMeta").textContent = `${p.source.file_name} · ${p.source.pages} ${plural(p.source.pages, "strana", "strany", "stran")} · ${language ? language.label : p.settings.language}`
+    + (p.working_copy ? " · starší textová vrstva odstraněna" : "");
   const anyStep = p.steps.some(s => s.implemented);
   const exportable = p.steps.some(s => s.implemented && (s.manual || s.id === "export"));
   $("runButton").disabled = p.running || !anyStep;
@@ -101,6 +104,13 @@ function renderWorkspace() {
   const failed = p.steps.find(s => s.state === "failed");
   $("projectError").hidden = !failed;
   $("projectError").textContent = failed ? `${failed.label}: ${failed.message || "krok selhal."}` : "";
+  const offer = failed && STEP_ACTIONS[failed.action];
+  if (offer) {
+    const button = document.createElement("button");
+    button.className = "primary notice-action"; button.textContent = offer.label; button.disabled = p.running;
+    button.onclick = () => act(async () => { await api(`/projects/${p.id}/${offer.path}`, "POST"); await refresh(); });
+    $("projectError").append(button);
+  }
   renderSteps(p);
   renderStepPreview(p);
 }

@@ -14,6 +14,10 @@ _Avoid_: Job, run, document (as a name for the whole unit)
 The scanned input PDF supplied by the user; the authority on what is printed.
 _Avoid_: Original, raw
 
+**Clean working copy**:
+The project's copy of the source PDF with an earlier OCR's invisible text layer removed and its scan images untouched. Once it exists, every step and the OCR PDF build on it; the source PDF itself never changes.
+_Avoid_: Cleaned source
+
 **OCR PDF**:
 The primary output: the source PDF with its scan images unchanged and an invisible text layer added.
 _Avoid_: Searchable PDF, result
