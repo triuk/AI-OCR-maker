@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AI-OCR-maker</title>
+  <link rel="stylesheet" href="app.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-symbol" aria-hidden="true">Ꭺ</span>
+      <div>AI-OCR-maker<small>OCR naskenovaných dokumentů</small></div>
+      <button id="shutdown" class="icon" title="Vypnout aplikaci" aria-label="Vypnout aplikaci">⏻</button>
+    </div>
+    <button id="newProject" class="primary wide">＋ Nový projekt</button>
+    <div class="sidebar-label"><span>PROJEKTY</span><span id="projectCount">0</span></div>
+    <input id="projectSearch" class="search" type="search" placeholder="Hledat projekt…" aria-label="Hledat projekt">
+    <nav id="projects" class="project-list" aria-label="Projekty"></nav>
+    <div class="sidebar-bottom"><span id="connection" class="connection">Připojuji…</span></div>
+  </aside>
+  <main>
+    <section id="empty" class="empty">
+      <div class="empty-symbol" aria-hidden="true">⎙</div>
+      <h1>Žádný projekt není otevřený</h1>
+      <p>Projekt vznikne ze zdrojového PDF se skeny stránek.<br>Zdrojové PDF zůstane beze změny.</p>
+      <button id="emptyNewProject" class="primary">＋ Nový projekt</button>
+    </section>
+    <section id="workspace" hidden>
+      <header class="project-header">
+        <div>
+          <h1 id="projectName"></h1>
+          <div class="meta"><span id="projectState" class="badge"></span><span id="projectMeta"></span></div>
+        </div>
+        <div class="actions">
+          <button id="diagnosticsButton">Diagnostika</button>
+          <button id="settingsButton">Nastavení</button>
+          <button id="exportButton">Exportovat</button>
+          <button id="stopButton">Zastavit</button>
+          <button id="runButton" class="primary">Spustit</button>
+        </div>
+      </header>
+      <section class="workflow" aria-label="Pracovní postup">
+        <ol id="steps" class="steps"></ol>
+      </section>
+      <div id="projectError" class="notice error" hidden></div>
+      <section id="stepPreview" class="step-preview" aria-live="polite"></section>
+    </section>
+  </main>
+
+  <dialog id="newDialog">
+    <form id="newForm" method="dialog">
+      <h2>Nový projekt</h2>
+      <label>Zdrojové PDF<input id="newSource" name="source" type="file" accept="application/pdf,.pdf" required></label>
+      <label>Název projektu<input id="newName" name="name" placeholder="Podle názvu souboru"></label>
+      <label>Jazyk dokumentu<select id="newLanguage" name="language"></select></label>
+      <p class="hint">Aplikace si zdrojové PDF zkopíruje do projektu; původní soubor nikdy nemění.</p>
+      <div class="dialog-actions">
+        <button type="button" data-close>Zrušit</button>
+        <button id="newSubmit" class="primary" type="submit">Vytvořit projekt</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="settingsDialog">
+    <form id="settingsForm" method="dialog">
+      <h2>Nastavení projektu</h2>
+      <label>Jazyk dokumentu<select id="settingsLanguage" name="language"></select></label>
+      <div class="dialog-actions">
+        <button id="deleteProject" type="button" class="danger push-left">Smazat projekt</button>
+        <button type="button" data-close>Zrušit</button>
+        <button class="primary" type="submit">Uložit</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="diagnosticsDialog" class="wide-dialog">
+    <h2>Diagnostika běhů</h2>
+    <div id="diagnosticsBody" class="diagnostics"></div>
+    <div class="dialog-actions"><button type="button" data-close>Zavřít</button></div>
+  </dialog>
+
+  <div id="toast" role="status" hidden></div>
+</body>
+</html>

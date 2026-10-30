@@ -1,0 +1,32 @@
+[build-system]
+requires = ["uv_build>=0.13.6,<0.14"]
+build-backend = "uv_build"
+
+[project]
+name = "ai-ocr-maker"
+version = "0.1.0"
+description = "Local OCR workbench: word-level text layer in reading order, AI only for problem spots"
+requires-python = "==3.12.*"
+dependencies = [
+  "fastapi>=0.162,<1",
+  "uvicorn>=0.54,<1",
+  "python-multipart>=0.0.32,<1",
+  "pymupdf>=2.0,<3",
+  "tesserocr>=2.12,<3",
+]
+
+[dependency-groups]
+dev = ["pytest>=9.2,<10", "httpx2>=2.16,<3"]
+
+[project.scripts]
+ocrmaker = "ocrmaker.app:main"
+
+[tool.uv]
+required-version = "==0.13.6"
+
+[tool.uv.build-backend]
+module-name = "ocrmaker"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: optional checks excluded from the default suite"]
