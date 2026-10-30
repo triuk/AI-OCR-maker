@@ -64,12 +64,15 @@ class StepContext:
 
     def __init__(self, *, step_id: str, project_id: str, run_id: str, settings: dict, source_pdf: Path,
                  output: StepOutput, language, results: Callable[[str], StepResult | None],
-                 progress: Callable[[int, int, str], None], stopped: Callable[[], bool], record: Callable[..., None]):
+                 progress: Callable[[int, int, str], None], stopped: Callable[[], bool], record: Callable[..., None],
+                 source_name: str = "source.pdf"):
         self.step_id = step_id
         self.project_id = project_id
         self.run_id = run_id
         self.settings = settings
         self.source_pdf = source_pdf
+        # The user's file name of the source PDF; output names derive from it.
+        self.source_name = source_name
         self.output = output
         # The language provider for AI requests; steps never know which AI answers (ADR 0002).
         self.language = language

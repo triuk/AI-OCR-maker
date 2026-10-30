@@ -230,3 +230,30 @@ def test_the_listing_says_which_steps_have_a_preview_and_the_ui_serves_it(client
     assert previews["import"] is True and previews["review"] is False
     assert client.get("/previews/import.js").status_code == 200
     assert "pageViewer" in client.get("/viewer.js").text
+
+
+def test_the_exported_ocr_pdf_is_listed_and_downloaded_under_a_name_derived_from_the_source(client, workflow,
+                                                                                         source_pdf):
+    project = upload(client, source_pdf).json()
+    base = f"/api/projects/{project['id']}"
+    assert client.get(f"{base}/outputs").json() == {"outputs": []}
+
+    client.post(f"{base}/run")
+    workflow.wait(project["id"])
+
+    [output] = client.get(f"{base}/outputs").json()["outputs"]
+    assert output["name"] == "zpravodaj-2000-05-ocr.pdf"
+    download = client.get(f"{base}/outputs/zpravodaj-2000-05-ocr.pdf")
+    assert (download.status_code, download.headers["content-type"]) == (200, "application/pdf")
+    assert 'filename="zpravodaj-2000-05-ocr.pdf"' in download.headers["content-disposition"]
+    assert download.content.startswith(b"%PDF") and len(download.content) == output["size"]
+    assert client.get(f"{base}/outputs/source.pdf").status_code == 404
+    assert client.get(f"{base}/outputs/zpravodaj-2000-05-ocr.pdf",
+                      headers={"X-Ocrmaker-Token": ""}, params={"token": TOKEN}).status_code == 200
+
+
+def test_the_listing_offers_previews_of_local_ocr_and_export(client):
+    previews = {step["id"]: step["preview"] for step in client.get("/api/projects").json()["steps"]}
+
+    assert previews["ocr"] is True and previews["export"] is True
+    assert "confidence" in client.get("/previews/ocr.js").text

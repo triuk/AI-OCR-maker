@@ -38,19 +38,38 @@ Working rasters
     file plus the file name, so a later step (Image preparation) can pass on Import's rasters unchanged
     or replace them with prepared ones that carry their own mapping, without copying files.
 
+Prepared pages and the page transform
+    Image preparation (`steps/prepare/pages.json`) passes the same list on, with each page's `raster`
+    possibly replaced by a prepared one (with its own `to_source`) and a `transform` added:
+
+        "transform": {"rotate": 0.0,  # degrees, clockwise as displayed, about the displayed page centre
+                      "crop": null}   # [x0, y0, x1, y1] in source page coordinates: the output CropBox
+
+    The transform is what the OCR PDF applies to the source page, losslessly (ADR 0003): rotation only
+    through the page's transformation matrix, cropping only through the CropBox. Recognition and export
+    read the prepared pages (`PREPARED_STEP`); stored geometry stays in source page coordinates, before
+    the transform, so word boxes always describe the original scan image. The identity is
+    `IDENTITY_TRANSFORM`; `transform_matrix` gives a page's transform as a matrix on source page
+    coordinates, `display_matrix` maps source page coordinates to the page as displayed (/Rotate applied).
+
 Matrices are 6-tuples [a, b, c, d, e, f] in the PDF/PyMuPDF convention: a point (x, y) maps to
 (a*x + c*y + e, b*x + d*y + f). Only affine mappings fit here; non-linear preparation (dewarping) must
 store its own mapping beside the raster and is out of scope until it exists (ADR 0003).
 """
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 
 # The step whose result is the authority on page geometry and the source-view rasters.
 PAGES_STEP = "import"
 PAGES_FILE = "pages.json"
+# The step whose pages.json carries the rasters recognition runs on and each page's transform.
+PREPARED_STEP = "prepare"
+IDENTITY_TRANSFORM = {"rotate": 0.0, "crop": None}
 
 Matrix = Sequence[float]
+IDENTITY = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
 
 
 def raster_name(index: int) -> str:
@@ -90,3 +109,29 @@ def invert(matrix: Matrix) -> list[float]:
 def read_pages(result) -> list[dict]:
     """The page geometry list stored in a step result (Import's, or a later step passing it on)."""
     return result.read_json(PAGES_FILE)["pages"]
+
+
+def display_size(page: dict) -> tuple[float, float]:
+    """Width and height of the page as displayed, in points."""
+    return (page["height"], page["width"]) if page["rotation"] % 180 else (page["width"], page["height"])
+
+
+def display_matrix(page: dict) -> list[float]:
+    """Source page coordinates -> the page as displayed (/Rotate applied, origin top-left, y downwards)."""
+    width, height = page["width"], page["height"]
+    return {0: [1, 0, 0, 1, 0, 0], 90: [0, 1, -1, 0, height, 0], 180: [-1, 0, 0, -1, width, height],
+            270: [0, -1, 1, 0, 0, width]}[page["rotation"] % 360]
+
+
+def transform_matrix(page: dict) -> list[float]:
+    """The page transform's rotation as a matrix on source page coordinates (identity when there is none)."""
+    degrees = (page.get("transform") or IDENTITY_TRANSFORM)["rotate"]
+    if not degrees:
+        return list(IDENTITY)
+    width, height = display_size(page)
+    cos, sin = math.cos(math.radians(degrees)), math.sin(math.radians(degrees))
+    # With y downwards, a positive angle turns clockwise as displayed.
+    about_centre = multiply(multiply([1, 0, 0, 1, -width / 2, -height / 2], [cos, sin, -sin, cos, 0, 0]),
+                            [1, 0, 0, 1, width / 2, height / 2])
+    display = display_matrix(page)
+    return multiply(multiply(display, about_centre), invert(display))

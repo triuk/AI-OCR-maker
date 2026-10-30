@@ -139,6 +139,17 @@ def create_api(workflow: Workflow, *, token: str | None = None, control=None) ->
     def page_image(project_id: str, page: int):
         return FileResponse(workflow.page_image(project_id, page), media_type="image/png")
 
+    @app.get("/api/projects/{project_id}/outputs")
+    def outputs(project_id: str):
+        """The files of the last export (name, size); empty until Export has finished."""
+        return {"outputs": workflow.outputs(project_id)}
+
+    @app.get("/api/projects/{project_id}/outputs/{name}")
+    def output(project_id: str, name: str):
+        """Download one exported file (also with ?token= for a plain link)."""
+        path = workflow.output(project_id, name)
+        return FileResponse(path, media_type="application/pdf" if name.endswith(".pdf") else None, filename=name)
+
     @app.get("/api/projects/{project_id}/diagnostics")
     def diagnostics(project_id: str, run_id: str | None = None):
         return {"records": workflow.diagnostics(project_id, run_id)}

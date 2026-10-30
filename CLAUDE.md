@@ -24,3 +24,6 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents
 - Page geometry, source page coordinates and working rasters are defined in `src/ocrmaker/pages.py`; the Import
   result is their authority. A step preview is `src/ocrmaker/ui/previews/<step id>.js` (loaded on demand) and
   normally draws its overlay through `ocrmaker.pageViewer` from `src/ocrmaker/ui/viewer.js`.
+- Recognised words (Local OCR's result: lines, word boxes, char boxes, confidence) are defined in
+  `src/ocrmaker/words.py`; the prepared pages with their page transform in `src/ocrmaker/pages.py`. The OCR PDF
+  is written by `src/ocrmaker/textlayer.py` from a per-page plan of lines of words, which the Export step builds.

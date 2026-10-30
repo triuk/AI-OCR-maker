@@ -18,6 +18,7 @@ from . import settings as project_settings
 from .diagnostics import Diagnostics, new_run_id
 from .errors import Conflict, ConfirmationRequired, StepError, StepInterrupted
 from .pages import PAGES_STEP, read_pages
+from .steps.export_step import OUTPUTS
 from .pdf import inspect_source
 from .step import Step, StepContext, StepOutput, StepResult
 from .steps import DEFINITIONS, STEP_IDS, STEPS, StepDefinition, implementations
@@ -191,6 +192,21 @@ class Workflow:
             raise KeyError("Obraz stránky zatím není k dispozici.")
         return result.path(raster["file"])
 
+    def outputs(self, project_id: str) -> list[dict]:
+        """The files the last export wrote (OCR PDF, ...): name and size in bytes; [] before any export."""
+        result = self.result(project_id, "export")
+        directory = result.path(OUTPUTS) if result else None
+        if directory is None or not directory.is_dir():
+            return []
+        return [{"name": path.name, "size": path.stat().st_size}
+                for path in sorted(directory.iterdir()) if path.is_file()]
+
+    def output(self, project_id: str, name: str) -> Path:
+        """The path of one exported file; KeyError when there is no such output."""
+        if name not in {output["name"] for output in self.outputs(project_id)}:
+            raise KeyError("Výstupní soubor neexistuje. Nejprve projekt exportujte.")
+        return self.result(project_id, "export").path(f"{OUTPUTS}/{name}")
+
     def diagnostics(self, project_id: str, run_id: str | None = None) -> list[dict]:
         self.store.get(project_id)
         return Diagnostics(self.store.diagnostics_dir(project_id)).records(run_id)
@@ -311,7 +327,8 @@ class Workflow:
             settings=project_settings.merged(document["settings"], {}),
             source_pdf=self.store.source_pdf(project_id), output=StepOutput(staging), language=self.language,
             results=lambda step_id: self.result(project_id, step_id), progress=progress, stopped=stop.is_set,
-            record=lambda kind, **data: diagnostics.record(run_id, kind, **data))
+            record=lambda kind, **data: diagnostics.record(run_id, kind, **data),
+            source_name=document["source"]["file_name"])
         error = None
         try:
             step.run(context)

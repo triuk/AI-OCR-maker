@@ -5,6 +5,7 @@ import threading
 
 from ocrmaker.errors import StepError
 from ocrmaker.step import Step
+from ocrmaker.steps.prepare_step import PrepareStep
 
 
 class RecordingStep(Step):
@@ -49,3 +50,14 @@ class BlockingStep(Step):
         while not self.release.wait(0.01):
             ctx.checkpoint()
         ctx.output.write_json("result.json", {"step": self.id})
+
+
+class TransformingPrepare(PrepareStep):
+    """Image preparation that leaves the rasters alone but sets a synthetic page transform (rotation, crop)."""
+
+    def __init__(self, rotate: float = 0.0, crop: list[float] | None = None):
+        self.rotate = rotate
+        self.crop = crop
+
+    def prepare_page(self, page, raster, ctx):
+        return {**page, "transform": {"rotate": self.rotate, "crop": self.crop}}
