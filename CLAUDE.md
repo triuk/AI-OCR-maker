@@ -24,3 +24,6 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents
 - Page geometry, source page coordinates and working rasters are defined in `src/ocrmaker/pages.py`; the Import
   result is their authority. A step preview is `src/ocrmaker/ui/previews/<step id>.js` (loaded on demand) and
   normally draws its overlay through `ocrmaker.pageViewer` from `src/ocrmaker/ui/viewer.js`.
+- AI requests go through `ctx.language.ask(...)` (`src/ocrmaker/language.py`); the CLIs are found on PATH or through
+  `OCRMAKER_CLAUDE` / `OCRMAKER_CODEX`. Seam 1 tests script the AI with `tests/fakes.py::ScriptedProvider`
+  (the `language_provider` fixture).

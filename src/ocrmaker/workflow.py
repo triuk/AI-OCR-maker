@@ -14,9 +14,11 @@ import traceback
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
+from . import providers
 from . import settings as project_settings
 from .diagnostics import Diagnostics, new_run_id
 from .errors import Conflict, ConfirmationRequired, StepError, StepInterrupted
+from .language import LanguageError, LanguageProvider, LanguageProviders, LanguageSession
 from .pages import PAGES_STEP, read_pages
 from .pdf import inspect_source
 from .step import Step, StepContext, StepOutput, StepResult
@@ -29,6 +31,10 @@ FINISHED = (DONE, WARNING)
 PROGRESS_INTERVAL = 0.25
 # Manual corrections belong to the review; rerunning a step before it discards them (ADR 0004).
 FIRST_MANUAL = next(index for index, definition in enumerate(STEPS) if definition.manual)
+# The Check AI request: as small as a request can be, and still a structured one like the steps send.
+CHECK_INSTRUCTIONS = "This is a connection check. Answer with the JSON object {\"ok\": true} and nothing else."
+CHECK_SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"],
+                "additionalProperties": False}
 
 
 def _pending_step() -> dict:
@@ -41,14 +47,17 @@ def _plural(count: int, one: str, few: str, many: str) -> str:
 
 
 class Workflow:
-    def __init__(self, store: ProjectStore, *, steps: Mapping[str, Step] | None = None, language=None):
+    def __init__(self, store: ProjectStore, *, steps: Mapping[str, Step] | None = None,
+                 language: Mapping[str, LanguageProvider] | LanguageProvider | None = None):
+        """language: the AI providers by name (the application passes providers.available()), or a single
+        provider standing in for every name (a scripted one in tests). None leaves AI unavailable."""
         self.store = store
         self.steps = dict(implementations() if steps is None else steps)
         unknown = set(self.steps) - set(STEP_IDS)
         if unknown:
             raise ValueError(f"Unknown step ids: {sorted(unknown)}")
-        # Passed to every step as ctx.language; a scripted provider in tests.
-        self.language = language
+        # Each step gets a LanguageSession over them as ctx.language, bound to the project's provider and model.
+        self.language = LanguageProviders(language)
         self._active: dict[str, tuple[threading.Event, threading.Thread | None]] = {}
         self._active_lock = threading.Lock()
         self._recover()
@@ -195,6 +204,34 @@ class Workflow:
         self.store.get(project_id)
         return Diagnostics(self.store.diagnostics_dir(project_id)).records(run_id)
 
+    # AI ----------------------------------------------------------------------------------------------
+
+    def check_ai(self, project_id: str, changes: dict | None = None) -> dict:
+        """Send a tiny request with the project's AI provider and model and say, in Czech, how it went.
+
+        changes are unsaved settings (ai_provider, ai_model) to try instead of the saved ones. The request
+        is recorded in the project's diagnostics like any other AI request.
+        """
+        settings = project_settings.merged(self.store.get(project_id)["settings"], changes or {})
+        run_id = new_run_id()
+        diagnostics = Diagnostics(self.store.diagnostics_dir(project_id))
+        session = LanguageSession(self.language, settings,
+                                  record=lambda kind, **data: diagnostics.record(run_id, kind, **data))
+        clock = time.monotonic()
+        result = {"provider": session.provider, "model": session.model}
+        try:
+            answer = session.ask(CHECK_INSTRUCTIONS, {"check": "connection"}, schema=CHECK_SCHEMA, purpose="check")
+        except LanguageError as exc:
+            return result | {"ok": False, "code": exc.code, "message": str(exc),
+                             "duration": round(time.monotonic() - clock, 3)}
+        valid = isinstance(answer.data, dict) and answer.data.get("ok") is True
+        label = providers.CATALOG[session.provider].label
+        return result | {
+            "ok": valid, "code": None if valid else "invalid_output", "usage": answer.usage,
+            "duration": round(time.monotonic() - clock, 3),
+            "message": f"{label} odpověděl (model {answer.model})." if valid
+            else f"{label} odpověděl, ale nečekaně: {answer.text[:200]}"}
+
     # Planning: checks that run synchronously, before any step starts ---------------------------------
 
     def _plan_run(self, project_id: str) -> Callable[[str, threading.Event], None]:
@@ -306,10 +343,13 @@ class Workflow:
                 document["steps"][definition.id]["progress"] = {"done": done, "total": total, "label": label}
             self.store.mutate(project_id, change)
 
+        settings = project_settings.merged(document["settings"], {})
         context = StepContext(
-            step_id=definition.id, project_id=project_id, run_id=run_id,
-            settings=project_settings.merged(document["settings"], {}),
-            source_pdf=self.store.source_pdf(project_id), output=StepOutput(staging), language=self.language,
+            step_id=definition.id, project_id=project_id, run_id=run_id, settings=settings,
+            source_pdf=self.store.source_pdf(project_id), output=StepOutput(staging),
+            language=LanguageSession(self.language, settings, stopped=stop.is_set,
+                                     record=lambda kind, **data: diagnostics.record(run_id, kind, step=definition.id,
+                                                                                     **data)),
             results=lambda step_id: self.result(project_id, step_id), progress=progress, stopped=stop.is_set,
             record=lambda kind, **data: diagnostics.record(run_id, kind, **data))
         error = None

@@ -4,8 +4,12 @@ Each workflow run appends to `<project>/diagnostics/<run id>.jsonl`. Every recor
 and `run_id`. Kinds written so far:
     step_started  {step, started}
     step          {step, started, finished, duration (s), outcome, message, warnings[, error]}
-Steps add their own kinds through StepContext.record, e.g. "ai_request" with provider, model, prompt,
-response and usage (unknown usage stays null, never 0).
+    ai_request    {step (absent for Check AI), purpose, provider, model, instructions, prompt, schema,
+                   web_search, images [{path, bytes}], duration (s), outcome (ok | failed | interrupted),
+                   response, usage {input, cached_input, output, reasoning, total, uncached_input} or null when
+                   unknown (never 0), usage_source, model_reported, details, error, error_code, retry_at}
+                  written by ocrmaker.language.LanguageSession for every AI request.
+Steps add their own kinds through StepContext.record.
 """
 from __future__ import annotations
 

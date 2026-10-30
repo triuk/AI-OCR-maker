@@ -8,6 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+from fakes import ScriptedProvider  # noqa: E402
 from pdfs import scan_pdf  # noqa: E402
 
 from ocrmaker.store import ProjectStore  # noqa: E402
@@ -34,8 +35,8 @@ def step_implementations():
 
 @pytest.fixture
 def language_provider():
-    """The AI stand-in passed to steps; a scripted language provider replaces None once AI steps exist."""
-    return None
+    """The AI stand-in for every provider name; script answers with language_provider.on(purpose, answer)."""
+    return ScriptedProvider()
 
 
 @pytest.fixture

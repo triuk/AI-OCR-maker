@@ -1,6 +1,7 @@
 """Per-project settings: defaults, Czech-labelled choices and validation."""
 from __future__ import annotations
 
+from . import providers
 from .tessdata import MODELS
 
 # Document languages offered in the UI; each has a pinned tessdata_best model.
@@ -9,6 +10,9 @@ assert set(LANGUAGES) <= set(MODELS)
 
 DEFAULTS = {
     "language": "ces",
+    "ai_provider": providers.DEFAULT,
+    # None means the provider's default model.
+    "ai_model": None,
 }
 
 
@@ -18,9 +22,25 @@ def _language(value):
     return value
 
 
-# One validator per setting; later tickets add their settings (AI provider, thresholds, web lookup) here.
+def _ai_provider(value):
+    if value not in providers.CATALOG:
+        raise ValueError("Neznámý poskytovatel AI.")
+    return value
+
+
+def _ai_model(value):
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        raise ValueError("Neplatný model AI.")
+    return value
+
+
+# One validator per setting; later tickets add their settings (thresholds, web lookup) here.
 VALIDATORS = {
     "language": _language,
+    "ai_provider": _ai_provider,
+    "ai_model": _ai_model,
 }
 assert set(VALIDATORS) == set(DEFAULTS)
 
@@ -33,9 +53,18 @@ def merged(current: dict, changes: dict) -> dict:
     result = DEFAULTS | current
     for key, value in changes.items():
         result[key] = VALIDATORS[key](value)
+    if {"ai_provider", "ai_model"} & set(changes) and result["ai_model"] is not None:
+        provider = providers.CATALOG[result["ai_provider"]]
+        if result["ai_model"] not in {model["id"] for model in provider.models()}:
+            if "ai_model" in changes:
+                raise ValueError(f"Model „{result['ai_model']}“ není u poskytovatele {provider.label} k dispozici.")
+            result["ai_model"] = None  # another provider was chosen: its default model replaces the old one
     return result
 
 
 def choices() -> dict:
     """What the UI offers for settings with a fixed set of values."""
-    return {"language": [{"id": key, "label": label} for key, label in LANGUAGES.items()]}
+    return {"language": [{"id": key, "label": label} for key, label in LANGUAGES.items()],
+            "ai_provider": [{"id": name, "label": provider.label, "default_model": provider.default_model()}
+                            for name, provider in providers.CATALOG.items()],
+            "ai_model": {name: provider.models() for name, provider in providers.CATALOG.items()}}
