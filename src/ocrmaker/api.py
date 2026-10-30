@@ -110,6 +110,11 @@ def create_api(workflow: Workflow, *, token: str | None = None, control=None) ->
     def run(project_id: str):
         return workflow.start(project_id, "run")
 
+    @app.post("/api/projects/{project_id}/text-layer/remove", status_code=202)
+    def remove_text_layer(project_id: str):
+        """The choice Import's stop offers for an earlier OCR's invisible text layer; visible text gets 422."""
+        return workflow.start(project_id, "remove_text_layer")
+
     @app.post("/api/projects/{project_id}/export", status_code=202)
     def export(project_id: str):
         return workflow.start(project_id, "export")

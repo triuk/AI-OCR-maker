@@ -70,6 +70,8 @@ class StepContext:
         self.project_id = project_id
         self.run_id = run_id
         self.settings = settings
+        # The PDF to work from and to build the OCR PDF on: the project's copy of the source PDF, or its clean
+        # working copy once an earlier OCR's text layer was removed. Read-only.
         self.source_pdf = source_pdf
         # The user's file name of the source PDF; output names derive from it.
         self.source_name = source_name

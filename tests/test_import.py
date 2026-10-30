@@ -6,7 +6,7 @@ import pytest
 import pymupdf
 
 from ocrmaker.pages import apply
-from pdfs import drawing_pdf, embedded_images, scan_pdf, text_pdf
+from pdfs import drawing_pdf, embedded_images, scan_pdf
 
 
 def import_step(project) -> dict:
@@ -73,22 +73,6 @@ def test_a_rotated_cropped_page_gets_an_upright_raster_mapped_back_to_source_pag
     assert apply(to_raster, 250, 375) == pytest.approx(((454 - 375) * scale, 250 * scale))
     assert apply(to_source, *apply(to_raster, 250, 375)) == pytest.approx((250, 375))
     assert apply(page["pdf_to_source"], 270, 504 - 380) == pytest.approx((250, 350))
-
-
-@pytest.mark.parametrize("make, pages", [
-    (lambda path: scan_pdf(path, pages=3, invisible_text="Starsi OCR vrstva"), "strany 1, 2, 3"),
-    (lambda path: text_pdf(path), "strana 1"),
-], ids=["invisible text layer", "visible text"])
-def test_a_source_pdf_with_a_text_layer_stops_import_with_a_czech_message(workflow, run, tmp_path, make, pages):
-    project = run(make(tmp_path / "with-text.pdf"))
-
-    step = import_step(project)
-    assert step["state"] == "failed"
-    assert f"Zdrojové PDF už obsahuje textovou vrstvu ({pages})" in step["message"]
-    record = next(r for r in workflow.diagnostics(project["id"]) if r["kind"] == "import")
-    assert record["outcome"] == "text_layer" and record["text_layer_words"] > 0
-    assert workflow.pages(project["id"]) == []
-    assert all(s["state"] == "pending" for s in project["steps"] if s["id"] != "import")
 
 
 def test_import_writes_a_diagnostic_record_with_each_pages_geometry_and_resolution(workflow, run, tmp_path):

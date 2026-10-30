@@ -30,3 +30,5 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents
 - AI requests go through `ctx.language.ask(...)` (`src/ocrmaker/language.py`); the CLIs are found on PATH or through
   `OCRMAKER_CLAUDE` / `OCRMAKER_CODEX`. Seam 1 tests script the AI with `tests/fakes.py::ScriptedProvider`
   (the `language_provider` fixture).
+- Steps read the PDF through `ctx.source_pdf`: the clean working copy once an earlier OCR's invisible text layer
+  was removed (`src/ocrmaker/existing_text.py`, `Workflow.remove_text_layer`), otherwise the source PDF copy.

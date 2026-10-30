@@ -46,11 +46,6 @@ def _numbers(values) -> list:
     return [_number(value) for value in values]
 
 
-def text_word_count(page: pymupdf.Page) -> int:
-    """Words of an existing text layer on the page, visible or not."""
-    return len(page.get_text("words"))
-
-
 def page_geometry(page: pymupdf.Page) -> dict:
     """The page's boxes, rotation and scan image, everything but the raster (see ocrmaker.pages)."""
     mediabox = page.mediabox  # PDF user space as written
