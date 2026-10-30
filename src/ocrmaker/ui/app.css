@@ -91,6 +91,7 @@ main { flex: 1; min-width: 0; padding: 20px 28px 12px; height: 100vh; overflow: 
 
 .notice { background: var(--warning-light); color: var(--warning); padding: 11px 14px; border-radius: 8px; line-height: 1.5; font-size: 12px; margin-bottom: 14px; white-space: pre-line; }
 .notice.error { background: var(--error-light); color: var(--error); }
+.notice .notice-action { display: block; margin-top: 9px; }
 .step-preview { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; min-height: 240px; }
 .step-preview h2 { margin-bottom: 6px; }
 .step-preview .facts { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
