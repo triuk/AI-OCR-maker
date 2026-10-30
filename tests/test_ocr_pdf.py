@@ -7,7 +7,7 @@ from difflib import SequenceMatcher
 import pymupdf
 import pytest
 
-from fakes import TransformingPrepare
+from fakes import TransformingPrepare, default_provider
 from ocrmaker.steps import implementations
 from ocrmaker.store import ProjectStore
 from ocrmaker.workflow import Workflow
@@ -45,9 +45,10 @@ def states(project) -> dict:
 def test_run_goes_through_import_preparation_local_ocr_and_export(columns):
     workflow, project, _ = columns
 
-    # Without an AI provider the reading order is geometric, with a warning.
+    # Without an AI provider the reading order is geometric, with a warning; the clean page has no problem
+    # spots, so AI reconstruction has nothing to ask.
     assert states(project) == {"import": "done", "prepare": "done", "ocr": "done", "layout": "done",
-                               "order": "warning", "problems": "done", "reconstruct": "pending",
+                               "order": "warning", "problems": "done", "reconstruct": "done",
                                "lookup": "pending", "review": "pending", "export": "done"}
     outputs = workflow.outputs(project["id"])
     assert [output["name"] for output in outputs] == ["zpravodaj-2000-05-ocr.md", "zpravodaj-2000-05-ocr.pdf"]
@@ -133,7 +134,8 @@ def test_a_page_transform_turns_and_crops_the_page_through_its_matrix_without_re
 
 @pytest.mark.parametrize("rotation, direction", [(90, (0, -1)), (270, (0, 1))])
 def test_a_page_displayed_with_rotate_gets_its_words_upright_in_their_boxes(tmp_path, rotation, direction):
-    workflow = Workflow(ProjectStore(tmp_path / "library"))
+    # Problem spots keep their own reading (the scripted AI confirms them), so the text layer is Local OCR's.
+    workflow = Workflow(ProjectStore(tmp_path / "library"), language=default_provider())
     source = columns_pdf(tmp_path / "sideways.pdf", rotation=rotation)
     project = workflow.run(workflow.create(source)["id"])
 

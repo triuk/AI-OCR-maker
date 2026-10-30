@@ -234,6 +234,7 @@ function openSettings() {
   $("settingsUnreadable").value = p.settings.problem_unreadable_confidence;
   $("settingsDoubtful").value = p.settings.problem_doubtful_confidence;
   $("settingsDictionary").value = (p.settings.project_dictionary || []).join("\n");
+  $("settingsReconstruction").value = p.settings.reconstruction_accept_confidence;
   $("settingsDialog").showModal();
 }
 
@@ -242,7 +243,8 @@ async function saveSettings(event) {
   await api(`/projects/${currentId}/settings`, "PUT", {language: $("settingsLanguage").value, ...aiChoice(),
     problem_unreadable_confidence: Number($("settingsUnreadable").value),
     problem_doubtful_confidence: Number($("settingsDoubtful").value),
-    project_dictionary: $("settingsDictionary").value});
+    project_dictionary: $("settingsDictionary").value,
+    reconstruction_accept_confidence: Number($("settingsReconstruction").value)});
   $("settingsDialog").close();
   await refresh();
 }

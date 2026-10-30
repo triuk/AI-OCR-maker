@@ -89,6 +89,11 @@
         <label>Slovník projektu (jedno slovo na řádek)<textarea id="settingsDictionary" rows="4" spellcheck="false"></textarea></label>
         <p class="hint">Slova ze slovníku projektu se nehlásí jako chybějící ve slovníku. Změna se projeví po novém spuštění kroku.</p>
       </fieldset>
+      <fieldset class="ai-settings">
+        <legend>AI rekonstrukce</legend>
+        <label>Přijmout rekonstrukci od důvěry AI (%)<input id="settingsReconstruction" type="number" min="0" max="100" step="1"></label>
+        <p class="hint">Méně jistá rekonstrukce dostane značku [NEČITELNÉ] a návrh AI zůstane jako nápověda pro ruční kontrolu.</p>
+      </fieldset>
       <div class="dialog-actions">
         <button id="deleteProject" type="button" class="danger push-left">Smazat projekt</button>
         <button type="button" data-close>Zrušit</button>

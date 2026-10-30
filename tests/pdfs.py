@@ -139,6 +139,18 @@ def printed_words(text: str = BINDING_TEXT, *, size=(420, 595), margin: float = 
         return [(word[4], tuple(word[:4])) for word in page.get_text("words")]
 
 
+def printed_text_pdf(path: Path, text: str, *, size=(420, 595), margin: float = 36, fontsize: float = 11,
+                     dpi: int = 300) -> Path:
+    """A clean scan of one column of text: the same page as printed_words(text) describes, no text layer."""
+    with pymupdf.open() as document:
+        image = _printed_page(document, text, size, margin, fontsize).get_pixmap(dpi=dpi, colorspace=pymupdf.csGRAY)
+    output = pymupdf.open()
+    scanned = output.new_page(width=size[0], height=size[1])
+    scanned.insert_image(scanned.rect, stream=image.tobytes("png"), keep_proportion=False)
+    output.save(path)
+    return path
+
+
 def binding_pdf(path: Path, text: str = BINDING_TEXT, *, size=(420, 595), margin: float = 36,
                 fontsize: float = 11, band: float = 90, dpi: int = 300) -> Path:
     """A scan of one column of text whose inner `band` points (the binding, on the left) are blurred and faded.

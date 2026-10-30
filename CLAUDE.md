@@ -48,3 +48,7 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents
   `src/ocrmaker/steps/problems_step.py`, their signals and kinds in `src/ocrmaker/problems.py`. Empty word boxes for
   ink Tesseract missed are added by `src/ocrmaker/inkgaps.py` inside Local OCR. The hunspell dictionaries are pinned
   in `src/ocrmaker/hunspell.py` (setup installs `ces`, others download on demand; `OCRMAKER_HUNSPELL` overrides the cache).
+- AI reconstruction (`src/ocrmaker/steps/reconstruct_step.py`, request/answer/result format in
+  `src/ocrmaker/reconstruction.py`) writes reconstruction records per page; `src/ocrmaker/transcription.py` applies
+  them (and Web lookup's, in the same format) to the words `ExportStep.exported_words` returns. Seam 1 tests read
+  printed ground truth through `tests/test_reconstruction.py::PrintedOcr` and script answers with `fakes.answer_spots`.

@@ -19,6 +19,8 @@ DEFAULTS = {
     # Problem detection: Tesseract confidence thresholds (0-100) and words the project accepts as correct.
     **THRESHOLDS,
     "project_dictionary": [],
+    # AI reconstruction: a reading at least this confident (0-100) is accepted, a less confident one is not.
+    "reconstruction_accept_confidence": 80.0,
 }
 
 
@@ -74,6 +76,7 @@ VALIDATORS = {
     "problem_unreadable_confidence": _confidence,
     "problem_doubtful_confidence": _confidence,
     "project_dictionary": _project_dictionary,
+    "reconstruction_accept_confidence": _confidence,
 }
 assert set(VALIDATORS) == set(DEFAULTS)
 

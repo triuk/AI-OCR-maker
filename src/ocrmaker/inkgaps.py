@@ -243,3 +243,13 @@ def _continues_vertically(page: _Page, top: int, bottom: int, start: int, end: i
     if above is None or below is None or not above.size or not below.size:
         return False
     return bool(above[:, start:end].all(axis=0).mean() > 0.5 and below[:, start:end].all(axis=0).mean() > 0.5)
+
+
+# Public access for other local measurements on the same ink (AI reconstruction's word box merges and splits).
+InkPage = _Page
+ink_runs = _runs
+
+
+def load_ink(raster: Path) -> _Page:
+    """The ink of one working raster, for measuring word boxes (see _Page.ink)."""
+    return _Page(_grey(raster))

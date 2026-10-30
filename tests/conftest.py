@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from fakes import ScriptedProvider  # noqa: E402
+from fakes import default_provider  # noqa: E402
 from pdfs import scan_pdf  # noqa: E402
 
 from ocrmaker.store import ProjectStore  # noqa: E402
@@ -37,10 +37,10 @@ def step_implementations():
 def language_provider():
     """The AI stand-in for every provider name; script answers with language_provider.on(purpose, answer).
 
-    Reading order answers by default with Layout's geometric numbering, as one article.
+    Reading order answers by default with Layout's geometric numbering, as one article; AI reconstruction
+    confirms every problem spot's own reading and leaves empty word boxes unanswered (fakes.answer_spots).
     """
-    return ScriptedProvider().on("reading_order", lambda request: {"articles": [
-        {"kind": "article", "blocks": [block["number"] for block in request.data["blocks"]], "continues": None}]})
+    return default_provider()
 
 
 @pytest.fixture

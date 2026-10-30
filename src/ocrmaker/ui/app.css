@@ -226,3 +226,12 @@ dialog::backdrop { background: #12232f55; backdrop-filter: blur(3px); }
 .legend-item i.problem-doubtful { border-color: #7048e8; background: #7048e833; border-style: dashed; }
 .ocr-empty { fill: #c92a2a1a; stroke: #c92a2a; stroke-dasharray: 3 2; }
 .legend-item i.ocr-empty { border-color: #c92a2a; border-style: dashed; }
+/* AI reconstruction preview */
+.rec-word { stroke-width: 1.8; }
+.rec-word:hover { stroke-width: 3.5; }
+.rec-accepted { fill: #2f9e4433; stroke: #2f9e44; }
+.rec-publisher { fill: #e8590c33; stroke: #e8590c; stroke-dasharray: 4 2; }
+.rec-unresolved { fill: #c92a2a40; stroke: #c92a2a; stroke-width: 2.2; }
+.legend-item i.rec-accepted { border-color: #2f9e44; background: #2f9e4433; }
+.legend-item i.rec-publisher { border-color: #e8590c; background: #e8590c33; border-style: dashed; }
+.legend-item i.rec-unresolved { border-color: #c92a2a; background: #c92a2a40; }

@@ -16,19 +16,21 @@ Export also writes the article text Markdown next to the OCR PDF (format in `ocr
 the front matter.
 
 Word text: both outputs take every word from `ExportStep.exported_words`, the one place where Export decides
-what a word says. AI reconstructions (#11) and manual corrections (#13, ADR 0004) are applied there.
+what a word says. Reconstruction records (AI reconstruction, Web lookup; `ocrmaker.transcription`) and manual
+corrections (#13, ADR 0004) are applied there.
 """
 from __future__ import annotations
 
 import time
 from pathlib import Path
 
-from .. import articletext, hunspell, textlayer, verify
+from .. import articletext, hunspell, textlayer, transcription, verify
 from ..layout import LAYOUT_STEP, read_layout_page
 from ..pages import PREPARED_STEP, read_pages
 from ..reading_order import ORDER_FILE, ORDER_STEP
 from ..step import ReportSection, Step, StepContext, StepResult
-from ..words import OCR_STEP, page_words, read_page
+from ..transcription import expand
+from ..words import OCR_STEP, read_page
 
 OUTPUTS = "outputs"
 PLAN_FILE = "textlayer.json"
@@ -47,14 +49,17 @@ def output_names(source_name: str) -> dict[str, str]:
 class ExportStep(Step):
     id = "export"
 
-    def exported_words(self, ctx: StepContext, recognised: dict) -> dict[str, dict]:
-        """The words of one page as every output writes them: {word id: {"id", "text", "bbox"}}, recognition order.
+    def exported_words(self, ctx: StepContext, recognised: dict) -> dict[str, list[dict]]:
+        """The words of one page as every output writes them: {OCR word id: [{"id", "text", "bbox"}, ...]}.
 
         This is the only place where Export takes a word's text, for the OCR PDF and the article text alike.
-        Today it is Local OCR's text. AI reconstruction (#11) replaces the text of reconstructed words (and may
-        add words of new boxes) and manual corrections (#13, ADR 0004) are applied last, both here.
+        Each OCR word id maps to the words written in its place, in recognition order: the word itself with
+        Local OCR's text, or what the reconstruction records settled (`ocrmaker.transcription`): the
+        reconstructed text, the illegible marker, no word for a box merged into its neighbour, several words
+        for a split box. Manual corrections (#13, ADR 0004) are applied last, here. Expand a line of word ids
+        with `transcription.expand(words, ids)`.
         """
-        return {word["id"]: {key: word[key] for key in ("id", "text", "bbox")} for word in page_words(recognised)}
+        return transcription.page_words(ctx, recognised)
 
     def text_layer_plan(self, ctx: StepContext, pages: list[dict]) -> list[dict]:
         """Per page, the lines of words in the order they are written: the reading order (articles, their
@@ -65,19 +70,17 @@ class ExportStep(Step):
         order_pages = {item["index"]: item for item in (order or {}).get("pages", [])}
         plan = []
         for page in pages:
-            recognised = read_page(ocr, page["index"]) or {"lines": []}
+            recognised = read_page(ocr, page["index"]) or {"index": page["index"], "lines": []}
             words = self.exported_words(ctx, recognised)
-            lines = [[words[word["id"]] for word in line["words"] if word["id"] in words]
-                     for line in recognised["lines"]]
+            lines = [expand(words, (word["id"] for word in line["words"])) for line in recognised["lines"]]
             if page["index"] in order_pages:
                 layout = read_layout_page(ctx.result(LAYOUT_STEP), page["index"]) or {"blocks": []}
                 blocks = {block["id"]: block for block in layout["blocks"]}
-                lines = [[words[word] for word in line if word in words]
-                         for article in order_pages[page["index"]]["articles"]
+                lines = [expand(words, line) for article in order_pages[page["index"]]["articles"]
                          for block in article["blocks"] for line in blocks[block]["lines"]]
                 # Words no block holds (there should be none) still reach the text layer, at the end.
-                placed = {word["id"] for line in lines for word in line}
-                rest = [word for word in words.values() if word["id"] not in placed]
+                placed = {word for block in layout["blocks"] for line in block["lines"] for word in line}
+                rest = expand(words, (word for word in words if word not in placed))
                 lines = [line for line in lines if line] + ([rest] if rest else [])
             plan.append({"index": page["index"], "lines": lines})
         return plan
@@ -98,8 +101,7 @@ class ExportStep(Step):
             words = self.exported_words(ctx, recognised)
             fallback = [{"id": f"p{index + 1}-text", "kind": "article", "continues": None, "blocks": [
                 {"id": f"p{index + 1}-text", "kind": "body",
-                 "lines": [[words[word["id"]] for word in line["words"] if word["id"] in words]
-                           for line in recognised["lines"]]}]}]
+                 "lines": [expand(words, (word["id"] for word in line["words"])) for line in recognised["lines"]]}]}]
             if index not in order_pages:
                 result.append({"index": index, "articles": fallback})
                 continue
@@ -107,11 +109,11 @@ class ExportStep(Step):
             blocks = {block["id"]: block for block in layout["blocks"]}
             articles = [{**article, "blocks": [
                 {"id": block, "kind": blocks[block]["kind"],
-                 "lines": [[words[word] for word in line if word in words] for line in blocks[block]["lines"]]}
+                 "lines": [expand(words, line) for line in blocks[block]["lines"]]}
                 for block in article["blocks"]]} for article in order_pages[index]["articles"]]
             # Words no block holds (there should be none) are not lost: they end the page as one more article.
             placed = {word for block in layout["blocks"] for line in block["lines"] for word in line}
-            rest = [word for word in words.values() if word["id"] not in placed]
+            rest = expand(words, (word for word in words if word not in placed))
             if rest:
                 articles.append({"id": f"p{index + 1}-rest", "kind": "article", "continues": None,
                                  "blocks": [{"id": f"p{index + 1}-rest", "kind": "body", "lines": [rest]}]})

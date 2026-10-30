@@ -180,3 +180,41 @@ class BrokenExport(ExportStep):
                     if document.xref_get_key(xref, "ToUnicode")[0] != "null":
                         document.xref_set_key(xref, "ToUnicode", "null")
                 document.saveIncr()
+
+
+def answer_spots(readings: dict | None = None, *, extra: list[dict] = ()):
+    """A scripted reconstruction answer: each marked spot with its own reading, confidently, unless told otherwise.
+
+    readings maps a spot id, or a tuple of spot ids (a merge), to an answer item's fields: "words" (a list of
+    texts, more than one for a split) or "text", plus "confidence", "error", "reasoning" and "intended".
+    Spots without a reading of their own (an empty word box, say) are left unanswered; extra items are added
+    as they are.
+    """
+    readings = {(key,) if isinstance(key, str) else tuple(key): value for key, value in (readings or {}).items()}
+
+    def answer(request):
+        spots = [spot["id"] for spot in request.data["spots"]]
+        covered = {spot_id for ids in readings for spot_id in ids}
+        items = []
+        for ids, fields in readings.items():
+            if set(ids) <= set(spots):
+                words = fields.get("words") or [fields["text"]]
+                items.append({"ids": list(ids), "words": words, "confidence": fields.get("confidence", 95),
+                              "error": fields.get("error", "recognition"),
+                              "reasoning": fields.get("reasoning", "Scripted reading."),
+                              "intended": fields.get("intended")})
+        for spot in request.data["spots"]:
+            if spot["id"] not in covered and spot["reading"]:
+                items.append({"ids": [spot["id"]], "words": [spot["reading"]], "confidence": 100, "error": "none",
+                              "reasoning": "The local reading matches the print.", "intended": None})
+        return {"readings": items + list(extra)}
+
+    return answer
+
+
+def default_provider() -> ScriptedProvider:
+    """The scripted AI of the language_provider fixture: Reading order as Layout's numbering in one article,
+    AI reconstruction confirming every problem spot's own reading (empty word boxes stay unanswered)."""
+    return ScriptedProvider().on("reading_order", lambda request: {"articles": [
+        {"kind": "article", "blocks": [block["number"] for block in request.data["blocks"]], "continues": None}]}
+    ).on("reconstruction", answer_spots())
