@@ -67,7 +67,7 @@ Determining the printed text of a problem spot from the image, its partial readi
 _Avoid_: Correction (reconstruction never changes legible text)
 
 **Illegible marker**:
-The literal text `[NEČITELNÉ]` written in place of a problem spot that every automatic reconstruction attempt failed to resolve; it is handed to manual review.
+The literal text `[NEČITELNÉ]` written in place of an unreadable word that every automatic reconstruction attempt failed to resolve; it is handed to manual review. An unresolved doubtful reading keeps its printed OCR text instead (ADR 0001) and is listed for manual review after the markers.
 
 ### Workflow
 
@@ -85,7 +85,7 @@ _Avoid_: Visualization, debug view
 The step in which the user resolves remaining illegible markers and checks the automatic result.
 
 **Review queue**:
-The list manual review leads the user through: every illegible marker still in force, with its image crop, surrounding text, partial reading and the AI candidate. It can optionally continue through the accepted reconstructions, for spot checks.
+The list manual review leads the user through: every illegible marker still in force, with its image crop, surrounding text, partial reading and the AI candidate, then every unresolved doubtful reading kept as read. It can optionally continue through the accepted reconstructions, for spot checks.
 _Avoid_: Todo list, worklist
 
 **Propagation suggestion**:
