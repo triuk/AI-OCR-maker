@@ -47,8 +47,9 @@ Rules:
   a table writes one row per line with cells (found from wide word gaps) separated by " | ".
 - Paragraphs are layout blocks. Two body blocks in a row of one article (across a column or page) form one
   paragraph when the first ends with a hyphen or without closing punctuation and the next starts in lower case.
-- Line-end hyphenation is removed and genuine hyphens are kept (`join_hyphenated`); the text layer of the
-  OCR PDF keeps the hyphenation as printed.
+- Line-end hyphenation is removed and genuine hyphens are kept (`join_hyphenated`, decided by the document's
+  own words and the dictionary, no AI; unclear cases default to removal); the text layer of the OCR PDF
+  keeps the hyphenation as printed.
 """
 from __future__ import annotations
 
@@ -104,6 +105,8 @@ def join_hyphenated(head: str, tail: str, *, seen: set[str] = frozenset(),
     - the document's own words (`seen`, lower case, read inside lines) name the hyphenated or the joined form;
     - the dictionary (`known`) knows the joined word: removed; it knows both parts but not the joined word: kept;
     - otherwise removed, the far more common case at a line end.
+    The decision is local only (document words and dictionary); no AI is asked, so an unclear case defaults to
+    removing the hyphen.
     """
     stem, hyphen = head[:-1], head[-1]
     if tail[:1] in HYPHENS and len(tail) > 1:
