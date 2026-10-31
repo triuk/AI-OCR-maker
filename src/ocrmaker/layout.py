@@ -2,8 +2,9 @@
 
 Every recognised word belongs to exactly one block (ADR 0005). Blocks are built locally from geometry:
 Tesseract's lines are split at wide gaps into line pieces, grid-like rows of short pieces become tables,
-the remaining pieces are chained downwards into paragraphs, and each block gets a kind from its size and
-position. Blocks are numbered in a geometric reading order (running headers first, then a recursive cut
+the remaining pieces are chained downwards into paragraphs (a short closing line stays with its paragraph
+even when Tesseract measures its letters larger), small stray artefacts (specks without letters or digits)
+join the nearest block, and each block gets a kind from its size and position. Blocks are numbered in a geometric reading order (running headers first, then a recursive cut
 into columns and bands, running footers last); that order is also the fallback reading order.
 
 The Layout result (`steps/layout/`) holds `layout.json`:
@@ -54,6 +55,9 @@ EDGE_BAND = 0.1          # running headers and footers lie within this share of 
 EDGE_GAP = 1.0           # ...and this many body x-heights away from the rest of the page
 TABLE_WORDS = 4          # a table cell has at most this many words
 TABLE_ROWS = 3           # a table has at least this many rows of at least two aligned cells
+CLOSING_WIDTH = 0.5      # a closing line of a paragraph is at most this share of the line above wide
+STRAY_SIZE = 2.0         # a stray artefact is at most this many body x-heights wide and high
+STRAY_REACH = 3.0        # ...and joins a block at most this many body x-heights away
 
 
 def page_file(index: int) -> str:
@@ -252,7 +256,8 @@ def _chains(pieces: list[_Piece]) -> list[list[_Piece]]:
             if overlap < 0.3 * min(above.width, piece.width):
                 continue
             sizes = (above.size, piece.size)
-            if None not in sizes and max(sizes) / max(min(sizes), 1e-6) > SIZE_RATIO:
+            if None not in sizes and max(sizes) / max(min(sizes), 1e-6) > SIZE_RATIO \
+                    and not _closing_line(above, piece):
                 continue
             score = (gap, -overlap)
             if best is None or score < best[0]:
@@ -269,6 +274,43 @@ def _chains(pieces: list[_Piece]) -> list[list[_Piece]]:
             chain.append(successor[id(chain[-1])])
         chains.append(chain)
     return chains
+
+
+def _closing_line(above: _Piece, piece: _Piece) -> bool:
+    """Whether a piece looks like the short last line of the paragraph line above it: much narrower, within
+    the line's width, and no taller. Its size is then no reason to start a block: Tesseract measures the
+    letters of a line of one or two words unreliably (often at the word's full height)."""
+    reach = above.height
+    return (piece.width <= CLOSING_WIDTH * above.width and piece.box[0] >= above.box[0] - reach
+            and piece.box[2] <= above.box[2] + reach and piece.height <= SIZE_RATIO * above.height)
+
+
+def _stray(piece: _Piece, texts: dict[str, str], body: float) -> bool:
+    """A small stray artefact: a piece without any letter or digit (a speck read as "-" or ".", an empty word
+    box of a speck), at most STRAY_SIZE body x-heights wide and high."""
+    return (not any(char.isalnum() for word in piece.words for char in texts.get(word["id"], ""))
+            and piece.width <= STRAY_SIZE * body and piece.height <= STRAY_SIZE * body)
+
+
+def _attach_strays(blocks: list[_Block], texts: dict[str, str], body: float) -> list[_Block]:
+    """Blocks of one stray artefact joined to the nearest block above them (or else beside or below them) that
+    lies within STRAY_REACH body x-heights; a stray with no block near stays a block of its own."""
+    strays = [block for block in blocks if len(block.lines) == 1 and _stray(block.lines[0], texts, body)]
+    kept = [block for block in blocks if block not in strays]
+    reach = STRAY_REACH * body
+    for stray in strays:
+        x, y = (stray.box[0] + stray.box[2]) / 2, (stray.box[1] + stray.box[3]) / 2
+
+        def distance(block: _Block) -> float:
+            return max(block.box[0] - x, 0, x - block.box[2]) + max(block.box[1] - y, 0, y - block.box[3])
+        near = [block for block in kept if block.kind != "table" and distance(block) <= reach]
+        if not near:
+            kept.append(stray)
+            continue
+        target = min(near, key=lambda block: (block.box[1] > y, distance(block)))
+        target.lines = sorted(target.lines + stray.lines, key=lambda line: (line.box[1], line.box[0]))
+        target.box = _union(line.box for line in target.lines)
+    return kept
 
 
 def _paragraphs(chain: list[_Piece]) -> list[list[_Piece]]:
@@ -368,6 +410,8 @@ def build_page(page: dict, recognised: dict) -> dict:
     blocks = _tables(pieces, body, width)
     for chain in _chains(pieces):
         blocks.extend(_Block(paragraph) for paragraph in _paragraphs(chain))
+    texts = {word["id"]: word["text"] for line in recognised["lines"] for word in line["words"]}
+    blocks = _attach_strays(blocks, texts, body)
     _kinds(blocks, body, height)
 
     edges = {kind: sorted((block for block in blocks if block.kind == kind),

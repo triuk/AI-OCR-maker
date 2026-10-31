@@ -8,10 +8,14 @@ import pymupdf
 import pytest
 
 from fakes import ScriptedProvider, run_and_export
-from layout_pdfs import CROSSING, CROSSING_COLUMNS, CROSSING_READING, RULES, TABLE_ROWS, printed_pdf
+from layout_pdfs import CROSSING, CROSSING_COLUMNS, CROSSING_READING, RULES, TABLE_ROWS, Print, printed_pdf
 from ocrmaker.language import LanguageError
+from ocrmaker.step import Step
+from ocrmaker.steps import implementations
 from ocrmaker.store import ProjectStore
+from ocrmaker.words import page_file
 from ocrmaker.workflow import Workflow
+from pdfs import CZECH_COLUMNS, printed_text_pdf, printed_words
 
 
 def article(*numbers, kind="article", continues=None) -> dict:
@@ -286,3 +290,76 @@ def test_the_diagnostics_record_the_reading_order_ai_request_of_every_page(rules
     assert [(record["index"], record["source"]) for record in pages] == [(0, "ai"), (1, "ai")]
     assert all(record["provider"] == "claude" and record["model"] == "scripted-model" and record["usage"]
                for record in pages)
+
+
+CONCERT = [Print("title", (40, 40, 380, 60), "Jarní koncert", 16),
+           # Wraps so that its last line is the one word "hudba.", which Tesseract measures taller than body text.
+           Print("concert", (40, 70, 240, 200), "Na letošním jarním koncertě základní umělecké školy vystoupili žáci "
+                 "všech oborů a sál kulturního domu byl zcela zaplněn. Diváky nejvíce potěšila lidová a dechová "
+                 "hudba."),
+           Print("next", (40, 210, 240, 300), "Další odstavec začíná zde a pokračuje ještě jedním řádkem textu o "
+                 "škole.")]
+
+
+def block_texts(workflow, project, page: int = 0) -> list[tuple[str, str]]:
+    """Each Layout block's kind and whole text, in Layout's order."""
+    recognised = workflow.result(project["id"], "ocr").read_json(page_file(page))
+    texts = {word["id"]: word["text"] for line in recognised["lines"] for word in line["words"]}
+    layout = workflow.result(project["id"], "layout").read_json(page_file(page))
+    return [(block["kind"], " ".join(texts[word] for line in block["lines"] for word in line))
+            for block in layout["blocks"]]
+
+
+def test_a_one_word_last_line_of_a_paragraph_stays_in_the_paragraph(tmp_path):
+    workflow = Workflow(ProjectStore(tmp_path / "library"), language=None)
+    project = workflow.run(workflow.create(printed_pdf(tmp_path / "zpravodaj.pdf", [CONCERT]))["id"])
+
+    texts = block_texts(workflow, project)
+    assert [kind for kind, _ in texts] == ["heading", "body", "body"]
+    assert texts[1][1].endswith("dechová hudba.")
+
+
+class StrayOcr(Step):
+    """Local OCR that reads a printed paragraph exactly and adds the stray artefacts of a real scan below its
+    last line: a speck read as "-" and a dot, each a tiny box of its own line."""
+
+    id = "ocr"
+
+    def __init__(self, printed):
+        self.printed = printed
+
+    def run(self, ctx):
+        rows: dict[float, list] = {}
+        for text, box in self.printed:
+            rows.setdefault(round(box[1], 1), []).append((text, box))
+        lines, count = [], 0
+
+        def line(items):
+            nonlocal count
+            words = []
+            for text, box in items:
+                count += 1
+                words.append({"id": f"p1-w{count}", "text": text, "bbox": [round(v, 2) for v in box],
+                              "confidence": 96.0, "chars": []})
+            return {"id": f"p1-l{len(lines) + 1}", "bbox": [words[0]["bbox"][0], min(w["bbox"][1] for w in words),
+                                                           words[-1]["bbox"][2], max(w["bbox"][3] for w in words)],
+                    "baseline": None, "block": 0, "paragraph": 0, "words": words}
+
+        for items in rows.values():
+            lines.append(line(items))
+        last = list(rows.values())[-1][0][1]
+        height = last[3] - last[1]
+        lines.append(line([("-", [last[0] + 60, last[3] + 0.4 * height, last[0] + 63, last[3] + 0.5 * height])]))
+        lines.append(line([(".", [last[0] + 90, last[3] + 0.3 * height, last[0] + 91.5, last[3] + 0.5 * height])]))
+        ctx.output.write_json(page_file(0), {"index": 0, "lines": lines})
+        ctx.output.write_json("ocr.json", {"engine": {"name": "stray"}, "pages": []})
+
+
+def test_a_small_stray_artefact_below_a_paragraph_joins_the_paragraph(tmp_path):
+    text = CZECH_COLUMNS[0]
+    steps = {**implementations(), "ocr": StrayOcr(printed_words(text))}
+    workflow = Workflow(ProjectStore(tmp_path / "library"), steps=steps, language=None)
+    project = workflow.run(workflow.create(printed_text_pdf(tmp_path / "zpravodaj.pdf", text))["id"])
+
+    [(kind, written)] = block_texts(workflow, project)
+    assert kind == "body" and set(written.split()[-2:]) == {"-", "."}
