@@ -214,7 +214,8 @@ def answer_spots(readings: dict | None = None, *, extra: list[dict] = ()):
 
 def default_provider() -> ScriptedProvider:
     """The scripted AI of the language_provider fixture: Reading order as Layout's numbering in one article,
-    AI reconstruction confirming every problem spot's own reading (empty word boxes stay unanswered)."""
+    AI reconstruction confirming every problem spot's own reading (empty word boxes stay unanswered), and Web
+    lookup settling nothing."""
     return ScriptedProvider().on("reading_order", lambda request: {"articles": [
         {"kind": "article", "blocks": [block["number"] for block in request.data["blocks"]], "continues": None}]}
-    ).on("reconstruction", answer_spots())
+    ).on("reconstruction", answer_spots()).on("lookup", {"lookups": []})

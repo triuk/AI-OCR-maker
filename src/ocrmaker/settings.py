@@ -21,6 +21,8 @@ DEFAULTS = {
     "project_dictionary": [],
     # AI reconstruction: a reading at least this confident (0-100) is accepted, a less confident one is not.
     "reconstruction_accept_confidence": 80.0,
+    # Web lookup: short web searches settle the spots AI reconstruction left unresolved (off: they keep the marker).
+    "web_lookup": True,
 }
 
 
@@ -50,6 +52,12 @@ def _confidence(value):
     return float(value)
 
 
+def _switch(value):
+    if not isinstance(value, bool):
+        raise ValueError("Přepínač musí být zapnuto, nebo vypnuto.")
+    return value
+
+
 def _project_dictionary(value):
     """A list of words, or text with one word per line; kept NFC, stripped, without duplicates."""
     if isinstance(value, str):
@@ -77,6 +85,7 @@ VALIDATORS = {
     "problem_doubtful_confidence": _confidence,
     "project_dictionary": _project_dictionary,
     "reconstruction_accept_confidence": _confidence,
+    "web_lookup": _switch,
 }
 assert set(VALIDATORS) == set(DEFAULTS)
 

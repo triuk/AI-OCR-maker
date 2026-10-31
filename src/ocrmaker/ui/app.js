@@ -235,6 +235,7 @@ function openSettings() {
   $("settingsDoubtful").value = p.settings.problem_doubtful_confidence;
   $("settingsDictionary").value = (p.settings.project_dictionary || []).join("\n");
   $("settingsReconstruction").value = p.settings.reconstruction_accept_confidence;
+  $("settingsWebLookup").checked = p.settings.web_lookup !== false;
   $("settingsDialog").showModal();
 }
 
@@ -244,7 +245,8 @@ async function saveSettings(event) {
     problem_unreadable_confidence: Number($("settingsUnreadable").value),
     problem_doubtful_confidence: Number($("settingsDoubtful").value),
     project_dictionary: $("settingsDictionary").value,
-    reconstruction_accept_confidence: Number($("settingsReconstruction").value)});
+    reconstruction_accept_confidence: Number($("settingsReconstruction").value),
+    web_lookup: $("settingsWebLookup").checked});
   $("settingsDialog").close();
   await refresh();
 }

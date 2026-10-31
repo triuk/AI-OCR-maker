@@ -1,6 +1,6 @@
 """Transcription: what each recognised word says once the automatic steps have settled its problem spots.
 
-Local OCR's words are the base. Steps that settle problem spots (AI reconstruction now, Web lookup later)
+Local OCR's words are the base. Steps that settle problem spots (AI reconstruction, then Web lookup)
 store reconstruction records (format in `ocrmaker.reconstruction`); each record covers one or more marked word
 ids and says which words replace them: the reconstructed text in locally measured word boxes, the
 illegible marker `[NEČITELNÉ]`, or the printed text kept as it is (publisher error). This module applies

@@ -194,17 +194,9 @@ class ReconstructStep(Step):
 
     @staticmethod
     def _placed(prepared: dict, ids: list[str], texts: list[str]) -> list[dict]:
-        """The accepted words in their boxes: the spot's own box for one word in one box, else measured."""
-        words = prepared["words"]
-        if len(ids) == 1 and len(texts) == 1:
-            return [{"id": ids[0], "text": texts[0], "bbox": words[ids[0]]["bbox"]}]
-        line = prepared["lines"][ids[0]]
-        others = [word["bbox"] for word in line["words"] if word["id"] not in ids]
-        raster = prepared["raster"]
-        boxes = rules.measure_words(prepared["ink"], raster["to_raster"], raster["to_source"],
-                                    [words[word_id]["bbox"] for word_id in ids], line["bbox"], others, texts)
-        names = ids[:len(texts)] + [f"{ids[0]}-{number}" for number in range(len(ids) + 1, len(texts) + 1)]
-        return [{"id": name, "text": text, "bbox": box} for name, text, box in zip(names, texts, boxes)]
+        """The accepted words in their boxes (see `reconstruction.place`)."""
+        return rules.place(prepared["ink"], prepared["raster"], prepared["lines"][ids[0]], prepared["words"], ids,
+                           texts)
 
     def overlay(self, result: StepResult, page: int) -> dict | None:
         """The words reconstruction wrote, each with its status, confidence, candidate, hint and reasoning."""

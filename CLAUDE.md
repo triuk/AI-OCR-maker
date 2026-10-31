@@ -52,3 +52,6 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents
   `src/ocrmaker/reconstruction.py`) writes reconstruction records per page; `src/ocrmaker/transcription.py` applies
   them (and Web lookup's, in the same format) to the words `ExportStep.exported_words` returns. Seam 1 tests read
   printed ground truth through `tests/test_reconstruction.py::PrintedOcr` and script answers with `fakes.answer_spots`.
+- Web lookup (`src/ocrmaker/steps/lookup_step.py`, queries/answer/result format in `src/ocrmaker/lookup.py`) searches
+  only for AI reconstruction's unresolved records and writes records with `"source": "web"` (plus `queries`,
+  `answer`, `sources`) only for the spots it settles; the setting `web_lookup` switches it off.
