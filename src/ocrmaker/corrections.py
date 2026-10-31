@@ -36,12 +36,18 @@ page; both outputs write the page's articles in this order (`ordered`).
      "previous": ["p1-a1", "p1-a2"]     # the automatic order when it was made (for the report)
 
 Every correction counts as one, whatever its kind; `apply` ignores kinds it does not write.
+
+Bookkeeping on the stored list (each changes it in place; the caller saves it under the run lock):
+`put_text`, `add_note`, `edit_note`, `put_order` and `remove`. They give new corrections their id and
+stamps and keep a replaced correction's id and creation time.
 """
 from __future__ import annotations
 
+import uuid
 from collections.abc import Iterable
 
 from .pages import union
+from .store import now
 
 TEXT, NOTE, ORDER = "text", "note", "order"
 SOURCES = ("queue", "word", "suggestion")
@@ -105,3 +111,75 @@ def apply(words: dict[str, list[dict]], recognised: dict, corrections: Iterable[
             words[word_id] = []
         words[ids[0]] = written_words(ids, correction["text"], union(boxes[word_id] for word_id in ids))
     return words
+
+
+# Bookkeeping on the stored list (see the module docstring). ---------------------------------------------
+
+def _stamped(made: dict, earlier: dict | None = None) -> dict:
+    """A correction made now: a new id and stamps, or those of the correction it replaces."""
+    stamp = now()
+    return {"id": earlier["id"] if earlier else uuid.uuid4().hex[:12], **made,
+            "created": earlier["created"] if earlier else stamp, "updated": stamp}
+
+
+def put_text(stored: list[dict], made: dict, source: str) -> dict | None:
+    """Store a text correction (kind, page, ids, text, previous) made from `source`, replacing every text
+    correction of the page it shares an id with (in the place of the first). Text equal to `previous` only
+    removes them. Returns the stored correction or None."""
+    overlapping = [item for item in stored if item.get("kind") == TEXT and item["page"] == made["page"]
+                   and set(item["ids"]) & set(made["ids"])]
+    correction = None
+    if made["text"] != made["previous"]:
+        correction = _stamped({**made, "source": source}, overlapping[0] if overlapping else None)
+    kept = []
+    for item in stored:
+        if item in overlapping:
+            if item is overlapping[0] and correction:
+                kept.append(correction)
+            continue
+        kept.append(item)
+    if correction and not overlapping:
+        kept.append(correction)
+    stored[:] = kept
+    return correction
+
+
+def add_note(stored: list[dict], made: dict) -> dict:
+    """Store a new region note (kind, page, bbox, text)."""
+    note = _stamped(made)
+    stored.append(note)
+    return note
+
+
+def find(stored: list[dict], correction_id: str, kind: str | None = None) -> dict:
+    """The stored correction with this id (and kind, when given); KeyError with a Czech message if none."""
+    found = next((item for item in stored if item.get("id") == correction_id
+                  and (kind is None or item.get("kind") == kind)), None)
+    if found is None:
+        raise KeyError("Poznámka neexistuje." if kind == NOTE else "Ruční oprava neexistuje.")
+    return found
+
+
+def edit_note(stored: list[dict], note_id: str, text: str) -> dict:
+    """Change a stored region note's text (already checked); KeyError for an unknown note."""
+    position = stored.index(find(stored, note_id, NOTE))
+    stored[position] = {**stored[position], "text": text, "updated": now()}
+    return stored[position]
+
+
+def put_order(stored: list[dict], made: dict) -> dict | None:
+    """Store a page's manual article order (kind, page, articles, previous) in place of the page's earlier
+    one; the automatic order only removes it. Returns the stored correction or None."""
+    position = next((n for n, item in enumerate(stored)
+                     if item.get("kind") == ORDER and item["page"] == made["page"]), None)
+    earlier = stored.pop(position) if position is not None else None
+    if made["articles"] == made["previous"]:
+        return None
+    correction = _stamped(made, earlier)
+    stored.insert(len(stored) if position is None else position, correction)
+    return correction
+
+
+def remove(stored: list[dict], correction_id: str) -> None:
+    """Remove one stored correction; KeyError for an unknown one."""
+    stored.remove(find(stored, correction_id))

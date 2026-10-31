@@ -11,7 +11,6 @@ import sys
 import threading
 import time
 import traceback
-import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -303,31 +302,11 @@ class Workflow:
         """
         if source not in manual.SOURCES:
             raise ValueError("Neznámý původ ruční opravy.")
-        lock = self._lock(project_id)
-        try:
-            stored = self.store.corrections(project_id)
+
+        def change(stored: list[dict]) -> dict | None:
             made = review.correction(self._review(project_id), page, word_id, text, stored)
-            overlapping = [item for item in stored if item.get("kind") == manual.TEXT and item["page"] == page
-                           and set(item["ids"]) & set(made["ids"])]
-            correction = None
-            if made["text"] != made["previous"]:
-                stamp = now()
-                first = overlapping[0] if overlapping else None
-                correction = {"id": first["id"] if first else uuid.uuid4().hex[:12], **made, "source": source,
-                              "created": first["created"] if first else stamp, "updated": stamp}
-            kept = []
-            for item in stored:
-                if item in overlapping:
-                    if item is overlapping[0] and correction:
-                        kept.append(correction)
-                    continue
-                kept.append(item)
-            if correction and not overlapping:
-                kept.append(correction)
-            self.store.write_corrections(project_id, kept)
-            return correction
-        finally:
-            lock.release()
+            return manual.put_text(stored, made, source)
+        return self._change_corrections(project_id, change)
 
     def suggestions(self, project_id: str, correction_id: str | None = None) -> list[dict]:
         """The open markers of the review queue that carry a propagation suggestion (ocrmaker.review), in
@@ -346,44 +325,27 @@ class Workflow:
 
     def add_note(self, project_id: str, page: int, bbox: list[float], text: str) -> dict:
         """Attach a note to a region of a page (source page coordinates); saved at once, it runs no step."""
-        def change(stored: list[dict]) -> dict:
-            stamp = now()
-            made = {"id": uuid.uuid4().hex[:12], **review.note(self._review(project_id), page, bbox, text),
-                    "created": stamp, "updated": stamp}
-            stored.append(made)
-            return made
-        return self._change_corrections(project_id, change)
+        return self._change_corrections(project_id, lambda stored: manual.add_note(
+            stored, review.note(self._review(project_id), page, bbox, text)))
 
     def edit_note(self, project_id: str, note_id: str, text: str) -> dict:
         """Change a region note's text; KeyError for an unknown note."""
         def change(stored: list[dict]) -> dict:
-            position = next((n for n, item in enumerate(stored)
-                             if item.get("id") == note_id and item.get("kind") == manual.NOTE), None)
-            if position is None:
-                raise KeyError("Poznámka neexistuje.")
-            old = stored[position]
+            old = manual.find(stored, note_id, manual.NOTE)
             made = review.note(self._review(project_id), old["page"], old["bbox"], text)
-            stored[position] = {**old, "text": made["text"], "updated": now()}
-            return stored[position]
+            return manual.edit_note(stored, note_id, made["text"])
         return self._change_corrections(project_id, change)
 
     def reorder_articles(self, project_id: str, page: int, article_ids: list[str]) -> dict | None:
         """Put a page's articles in a new order (every article id of the page once), applied at Export to both
         outputs. It replaces the page's earlier manual order; the automatic order removes it. Returns the
         stored correction or None."""
-        def change(stored: list[dict]) -> dict | None:
-            made = review.article_order(self._review(project_id), page, article_ids)
-            position = next((n for n, item in enumerate(stored)
-                             if item.get("kind") == manual.ORDER and item["page"] == page), None)
-            earlier = stored.pop(position) if position is not None else None
-            if made["articles"] == made["previous"]:
-                return None
-            stamp = now()
-            correction = {"id": earlier["id"] if earlier else uuid.uuid4().hex[:12], **made,
-                          "created": earlier["created"] if earlier else stamp, "updated": stamp}
-            stored.insert(len(stored) if position is None else position, correction)
-            return correction
-        return self._change_corrections(project_id, change)
+        return self._change_corrections(project_id, lambda stored: manual.put_order(
+            stored, review.article_order(self._review(project_id), page, article_ids)))
+
+    def revert_correction(self, project_id: str, correction_id: str) -> None:
+        """Remove one manual correction; the word is exported as the automatic steps wrote it again."""
+        self._change_corrections(project_id, lambda stored: manual.remove(stored, correction_id))
 
     def _change_corrections(self, project_id: str, change: Callable[[list[dict]], Any]) -> Any:
         """Change the stored manual corrections in place under the run lock (refused during a run)."""
@@ -393,18 +355,6 @@ class Workflow:
             outcome = change(stored)
             self.store.write_corrections(project_id, stored)
             return outcome
-        finally:
-            lock.release()
-
-    def revert_correction(self, project_id: str, correction_id: str) -> None:
-        """Remove one manual correction; the word is exported as the automatic steps wrote it again."""
-        lock = self._lock(project_id)
-        try:
-            stored = self.store.corrections(project_id)
-            kept = [item for item in stored if item.get("id") != correction_id]
-            if len(kept) == len(stored):
-                raise KeyError("Ruční oprava neexistuje.")
-            self.store.write_corrections(project_id, kept)
         finally:
             lock.release()
 
