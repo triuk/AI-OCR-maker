@@ -582,8 +582,12 @@ class Workflow:
                 return
             last_progress[0] = moment
 
+            # A rough estimate of the time left: the step's pace so far over the units still to do.
+            remaining = round((moment - clock) / done * (total - done), 1) if 0 < done < total else None
+
             def change(document):
-                document["steps"][definition.id]["progress"] = {"done": done, "total": total, "label": label}
+                document["steps"][definition.id]["progress"] = {"done": done, "total": total, "label": label,
+                                                                "remaining": remaining}
             self.store.mutate(project_id, change)
 
         settings = project_settings.merged(document["settings"], {})

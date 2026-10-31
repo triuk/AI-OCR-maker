@@ -35,6 +35,14 @@ function toast(message) {
 // Czech plural form for a count: one, two to four, five and more.
 function plural(n, one, few, many) { return n === 1 ? one : n >= 2 && n <= 4 ? few : many; }
 function seconds(value) { return value == null ? "" : value.toLocaleString("cs-CZ", {maximumFractionDigits: 1}) + " s"; }
+// A rough "time left" of a running step, from its progress (null until a first unit is done).
+function timeLeft(progress) {
+  const value = progress && progress.remaining;
+  if (value == null) return "";
+  if (value < 60) return `zbývá asi ${Math.max(1, Math.round(value / 5) * 5)} s`;
+  const minutes = Math.round(value / 60);
+  return minutes < 60 ? `zbývá asi ${minutes} min` : `zbývá asi ${Math.floor(minutes / 60)} h ${minutes % 60} min`;
+}
 function dateTime(value) { return value ? new Date(value).toLocaleString("cs-CZ") : ""; }
 
 // A URL usable in <img src> and similar, where no header can carry the token.
@@ -118,7 +126,8 @@ function renderWorkspace() {
 
 function renderSteps(p) {
   $("steps").innerHTML = p.steps.map((s, index) => {
-    const progress = s.state === "running" && s.progress ? `<progress max="${s.progress.total || 1}" value="${s.progress.done}"></progress>` : "";
+    const left = s.state === "running" ? timeLeft(s.progress) : "";
+    const progress = s.state === "running" && s.progress ? `<progress max="${s.progress.total || 1}" value="${s.progress.done}" title="${esc(left)}"></progress>${left ? `<span class="left">${esc(left)}</span>` : ""}` : "";
     const title = [s.implemented ? "" : "Krok zatím není k dispozici.", s.message || ""].filter(Boolean).join("\n");
     return `<li><button class="step ${s.state} ${s.implemented ? "" : "unavailable"} ${s.id === selectedStep ? "selected" : ""}" data-step="${esc(s.id)}" title="${esc(title)}">
       <span class="number">${index + 1}</span><span class="label">${esc(s.label)}</span>${progress}
@@ -143,7 +152,8 @@ function renderStepPreview(p) {
   previewKey = key;
   const facts = [STATE_LABELS[step.state], step.started && `zahájeno ${dateTime(step.started)}`,
                  step.duration != null && `trvání ${seconds(step.duration)}`,
-                 step.progress && `${step.progress.label || ""} ${step.progress.done}/${step.progress.total}`].filter(Boolean);
+                 step.progress && `${step.progress.label || ""} ${step.progress.done}/${step.progress.total}`,
+                 step.state === "running" && timeLeft(step.progress)].filter(Boolean);
   const rerunnable = step.implemented && step.state !== "pending";
   container.innerHTML = `<div class="preview-head"><h2>${esc(step.label)}</h2>${rerunnable ? `<button id="rerunStep" type="button" title="Spustí krok znovu od čistého stavu; jeho výsledky i výsledky všech dalších kroků se nahradí">Spustit znovu</button>` : ""}</div>
     <div class="facts">${esc(facts.join(" · "))}</div>

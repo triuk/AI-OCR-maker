@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import threading
+import time
 
 import pytest
 
@@ -312,3 +313,29 @@ def test_steps_receive_the_project_settings_and_the_language_provider(make_workf
 
     assert seen == {"language": "eng", "answer": "hi"}
     assert [request.purpose for request in provider.requests] == ["probe"]
+
+
+class PagedStep(BlockingStep):
+    """Works through four pages of 0.3 s each, reporting progress, and waits after the first one."""
+
+    def run(self, ctx):
+        ctx.progress(0, 4, "Stránka 1 z 4")
+        time.sleep(0.3)
+        ctx.progress(1, 4, "Stránka 2 z 4")
+        super().run(ctx)
+
+
+def test_a_running_step_shows_roughly_how_long_is_left(make_workflow, source_pdf, client):
+    paged = PagedStep("import")
+    workflow = make_workflow(paged)
+    project = workflow.create(source_pdf)
+
+    workflow.start(project["id"])
+    assert paged.entered.wait(5)
+    progress = next(step for step in workflow.get(project["id"])["steps"] if step["id"] == "import")["progress"]
+    paged.release.set()
+    workflow.wait(project["id"], timeout=5)
+
+    assert (progress["done"], progress["total"]) == (1, 4)
+    assert 0.8 <= progress["remaining"] <= 1.5  # three more pages at about 0.3 s each
+    assert "zbývá" in client.get("/app.js").text
