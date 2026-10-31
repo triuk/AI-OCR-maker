@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import settings as project_settings
@@ -148,6 +148,38 @@ def create_api(workflow: Workflow, *, token: str | None = None, control=None) ->
     @app.get("/api/projects/{project_id}/pages/{page}/image")
     def page_image(project_id: str, page: int):
         return FileResponse(workflow.page_image(project_id, page), media_type="image/png")
+
+    @app.get("/api/projects/{project_id}/review/queue")
+    def review_queue(project_id: str):
+        """Manual review's queue of illegible markers (ocrmaker.review); 422 until automation has finished."""
+        return workflow.review_queue(project_id)
+
+    @app.get("/api/projects/{project_id}/review/pages/{page}")
+    def review_page(project_id: str, page: int):
+        """A page's text as Export would write it now, word by word with origins and correction targets."""
+        return workflow.review_page(project_id, page)
+
+    @app.get("/api/projects/{project_id}/review/pages/{page}/crop/{word_id}")
+    def review_crop(project_id: str, page: int, word_id: str):
+        return Response(workflow.review_crop(project_id, page, word_id), media_type="image/png")
+
+    @app.get("/api/projects/{project_id}/corrections")
+    def corrections(project_id: str):
+        return {"corrections": workflow.corrections(project_id)}
+
+    @app.put("/api/projects/{project_id}/corrections")
+    def correct(project_id: str, body: dict):
+        """Save a manual correction at once: {"page", "word" (a written word's id), "text", "source"}."""
+        if not isinstance(body.get("page"), int) or not isinstance(body.get("word"), str) \
+                or not isinstance(body.get("text"), str):
+            raise ValueError("Oprava potřebuje stránku, slovo a text.")
+        return {"correction": workflow.correct(project_id, body["page"], body["word"], body["text"],
+                                               source=body.get("source") or "word")}
+
+    @app.delete("/api/projects/{project_id}/corrections/{correction_id}")
+    def revert_correction(project_id: str, correction_id: str):
+        workflow.revert_correction(project_id, correction_id)
+        return {"reverted": correction_id}
 
     @app.get("/api/projects/{project_id}/outputs")
     def outputs(project_id: str):

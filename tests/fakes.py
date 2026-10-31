@@ -218,3 +218,9 @@ def default_provider() -> ScriptedProvider:
     return ScriptedProvider().on("reading_order", lambda request: {"articles": [
         {"kind": "article", "blocks": [block["number"] for block in request.data["blocks"]], "continues": None}]}
     ).on("reconstruction", answer_spots())
+
+
+def run_and_export(workflow, project_id: str) -> dict:
+    """Spustit, then Exportovat: the automatic steps up to manual review, then an export with no corrections."""
+    workflow.run(project_id)
+    return workflow.export(project_id)

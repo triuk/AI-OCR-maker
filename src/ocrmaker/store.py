@@ -5,7 +5,7 @@ Layout of `<root>/projects/<id>/`:
     source.pdf            a read-only copy of the user's source PDF
     working.pdf           the clean working copy, once an earlier OCR's text layer was removed (read-only)
     steps/<step id>/      the committed result of each step (see ocrmaker.step.StepResult)
-    corrections.json      manual corrections, a separate layer applied at export (ADR 0004)
+    corrections.json      manual corrections, a separate layer applied at export (ADR 0004; ocrmaker.corrections)
     diagnostics/<run>.jsonl  diagnostic records of one workflow run
     .run.lock             held while a workflow run owns the project
 """

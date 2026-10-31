@@ -5,7 +5,7 @@ import numpy
 import pymupdf
 import pytest
 
-from fakes import answer_spots
+from fakes import answer_spots, run_and_export
 from ocrmaker.step import Step
 from ocrmaker.steps import implementations
 from ocrmaker.store import ProjectStore
@@ -86,7 +86,7 @@ def run(tmp_path, language_provider, ocr: PrintedOcr, **settings):
     workflow = Workflow(ProjectStore(tmp_path / "library"), steps={**implementations(), "ocr": ocr},
                         language=language_provider)
     project = workflow.create(printed_text_pdf(tmp_path / "zpravodaj.pdf", TEXT), settings=settings or None)
-    return workflow, workflow.run(project["id"])
+    return workflow, run_and_export(workflow, project["id"])
 
 
 def ocr_words(workflow, project) -> dict[str, dict]:

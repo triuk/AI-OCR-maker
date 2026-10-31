@@ -7,7 +7,7 @@ from difflib import SequenceMatcher
 import pymupdf
 import pytest
 
-from fakes import ScriptedProvider
+from fakes import ScriptedProvider, run_and_export
 from layout_pdfs import CROSSING, CROSSING_COLUMNS, CROSSING_READING, RULES, TABLE_ROWS, printed_pdf
 from ocrmaker.language import LanguageError
 from ocrmaker.store import ProjectStore
@@ -60,7 +60,8 @@ def crossing(tmp_path_factory):
     provider.on("reading_order", lambda request: {"articles": [
         article(*(numbers_by_key(request, CROSSING)[key] for key in CROSSING_READING))]})
     workflow = Workflow(ProjectStore(directory / "library"), language=provider)
-    project = workflow.run(workflow.create(printed_pdf(directory / "zpravodaj-2000-05.pdf", [CROSSING]))["id"])
+    project = run_and_export(workflow,
+                             workflow.create(printed_pdf(directory / "zpravodaj-2000-05.pdf", [CROSSING]))["id"])
     return workflow, provider, project
 
 
@@ -68,7 +69,11 @@ def rerun_order(crossing, *answers):
     workflow, provider, project = crossing
     provider.requests.clear()
     provider.on("reading_order", *answers)
-    return workflow.rerun(project["id"], "order")
+    project = workflow.rerun(project["id"], "order")
+    # The rerun goes on up to manual review; an export then writes the outputs, as the user would.
+    if states(project)["order"]["state"] in ("done", "warning"):
+        project = workflow.export(project["id"])
+    return project
 
 
 def test_the_ocr_pdf_text_follows_the_articles_in_the_ai_reading_order(crossing):
@@ -149,7 +154,7 @@ def test_a_failed_ai_connection_fails_the_step_with_its_czech_message(crossing):
 
 def test_without_any_ai_provider_the_order_is_geometric_with_a_warning(tmp_path):
     workflow = Workflow(ProjectStore(tmp_path / "library"))
-    project = workflow.run(workflow.create(printed_pdf(tmp_path / "zpravodaj.pdf", [CROSSING]))["id"])
+    project = run_and_export(workflow, workflow.create(printed_pdf(tmp_path / "zpravodaj.pdf", [CROSSING]))["id"])
 
     assert states(project)["order"]["state"] == "warning"
     assert "AI není k dispozici" in states(project)["order"]["message"]
@@ -220,7 +225,7 @@ def rules_run(tmp_path_factory):
                              article(number["header-2"], kind="header")]}
     provider.on("reading_order", answer)
     workflow = Workflow(ProjectStore(directory / "library"), language=provider)
-    project = workflow.run(workflow.create(printed_pdf(directory / "zpravodaj-2000-05.pdf", RULES))["id"])
+    project = run_and_export(workflow, workflow.create(printed_pdf(directory / "zpravodaj-2000-05.pdf", RULES))["id"])
     return workflow, provider, project
 
 

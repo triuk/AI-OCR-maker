@@ -66,7 +66,7 @@ class StepContext:
     def __init__(self, *, step_id: str, project_id: str, run_id: str, settings: dict, source_pdf: Path,
                  output: StepOutput, language, results: Callable[[str], StepResult | None],
                  progress: Callable[[int, int, str], None], stopped: Callable[[], bool], record: Callable[..., None],
-                 source_name: str = "source.pdf"):
+                 source_name: str = "source.pdf", corrections: Callable[[], list] | None = None):
         self.step_id = step_id
         self.project_id = project_id
         self.run_id = run_id
@@ -84,6 +84,11 @@ class StepContext:
         self._progress = progress
         self._stopped = stopped
         self._record = record
+        self._corrections = corrections or list
+
+    def corrections(self) -> list[dict]:
+        """The project's manual corrections as they stand (ocrmaker.corrections); manual review hands them on."""
+        return list(self._corrections())
 
     def result(self, step_id: str) -> StepResult:
         """The committed result of an earlier step; a missing one fails this step with a Czech message."""

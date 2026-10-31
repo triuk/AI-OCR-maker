@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from fakes import RecordingStep, ScriptedProvider
+from fakes import RecordingStep, ScriptedProvider, run_and_export
 from ocrmaker.step import Step
 from ocrmaker.store import ProjectStore
 from ocrmaker.workflow import Workflow
@@ -69,11 +69,11 @@ def test_every_run_leaves_its_own_report_even_a_failed_one(workflow, project, li
 
 @pytest.fixture(scope="module")
 def recognised(tmp_path_factory):
-    """A real run (Tesseract) over a page of known Czech text: the report of Run, which exports too."""
+    """A real run (Tesseract) over a page of known Czech text, then an export: the export's report."""
     directory = tmp_path_factory.mktemp("report")
     workflow = Workflow(ProjectStore(directory / "library"))
     source = columns_pdf(directory / "zpravodaj-2000-05.pdf")
-    project = workflow.run(workflow.create(source)["id"])
+    project = run_and_export(workflow, workflow.create(source)["id"])
     return workflow, project
 
 

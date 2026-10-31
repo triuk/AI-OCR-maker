@@ -4,7 +4,7 @@ from __future__ import annotations
 import pymupdf
 import pytest
 
-from fakes import BrokenExport, TransformingPrepare
+from fakes import BrokenExport, TransformingPrepare, run_and_export
 from ocrmaker.steps import implementations
 from ocrmaker.store import ProjectStore
 from ocrmaker.workflow import Workflow
@@ -19,7 +19,7 @@ def recognised(tmp_path_factory):
     """
     directory = tmp_path_factory.mktemp("verification")
     workflow = Workflow(ProjectStore(directory / "library"))
-    project = workflow.run(workflow.create(columns_pdf(directory / "zpravodaj-2000-05.pdf"))["id"])
+    project = run_and_export(workflow, workflow.create(columns_pdf(directory / "zpravodaj-2000-05.pdf"))["id"])
     return directory / "library", project["id"]
 
 
@@ -112,7 +112,7 @@ def test_a_correct_assembly_verifies_without_findings_also_on_turned_and_rotated
     if transform:
         steps["prepare"] = TransformingPrepare(rotate=transform[0], crop=transform[1])
     workflow = Workflow(ProjectStore(tmp_path / "library"), steps=steps)
-    project = workflow.run(workflow.create(columns_pdf(tmp_path / "scan.pdf", rotation=rotation))["id"])
+    project = run_and_export(workflow, workflow.create(columns_pdf(tmp_path / "scan.pdf", rotation=rotation))["id"])
 
     assert step(project, "export")["state"] == "done"
     [record] = verification_records(workflow, project)

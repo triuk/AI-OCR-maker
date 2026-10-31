@@ -52,3 +52,8 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents
   `src/ocrmaker/reconstruction.py`) writes reconstruction records per page; `src/ocrmaker/transcription.py` applies
   them (and Web lookup's, in the same format) to the words `ExportStep.exported_words` returns. Seam 1 tests read
   printed ground truth through `tests/test_reconstruction.py::PrintedOcr` and script answers with `fakes.answer_spots`.
+- Manual review (`src/ocrmaker/steps/review_step.py`) is the manual step: Run stops before it, Export runs it and
+  then Export. The review service (`src/ocrmaker/review.py`: queue, page text, crops) backs `Workflow.review_queue`,
+  `review_page`, `review_crop`, `correct` and `revert_correction`; manual corrections (format in
+  `src/ocrmaker/corrections.py`) are saved at once, run no step, and reach Export through the Review step's result.
+  Seam 1 tests that need the outputs run and then export (`tests/fakes.py::run_and_export`).

@@ -7,7 +7,7 @@ from difflib import SequenceMatcher
 import pymupdf
 import pytest
 
-from fakes import TransformingPrepare, default_provider
+from fakes import TransformingPrepare, default_provider, run_and_export
 from ocrmaker.steps import implementations
 from ocrmaker.store import ProjectStore
 from ocrmaker.workflow import Workflow
@@ -20,7 +20,7 @@ def columns(tmp_path_factory):
     directory = tmp_path_factory.mktemp("columns")
     workflow = Workflow(ProjectStore(directory / "library"))
     source = columns_pdf(directory / "zpravodaj-2000-05.pdf")
-    project = workflow.run(workflow.create(source)["id"])
+    project = run_and_export(workflow, workflow.create(source)["id"])
     return workflow, project, source
 
 
@@ -49,7 +49,7 @@ def test_run_goes_through_import_preparation_local_ocr_and_export(columns):
     # spots, so AI reconstruction has nothing to ask.
     assert states(project) == {"import": "done", "prepare": "done", "ocr": "done", "layout": "done",
                                "order": "warning", "problems": "done", "reconstruct": "done",
-                               "lookup": "pending", "review": "pending", "export": "done"}
+                               "lookup": "pending", "review": "done", "export": "done"}
     outputs = workflow.outputs(project["id"])
     assert [output["name"] for output in outputs] == ["zpravodaj-2000-05-ocr.md", "zpravodaj-2000-05-ocr.pdf"]
     with pymupdf.open(workflow.output(project["id"], "zpravodaj-2000-05-ocr.pdf")) as document:
@@ -108,7 +108,7 @@ def test_a_page_transform_turns_and_crops_the_page_through_its_matrix_without_re
     steps = {**implementations(), "prepare": TransformingPrepare(rotate=2.0, crop=[10, 20, 400, 580])}
     workflow = Workflow(ProjectStore(tmp_path / "library"), steps=steps)
     source = columns_pdf(tmp_path / "skewed.pdf", size=(420, 595))
-    project = workflow.run(workflow.create(source)["id"])
+    project = run_and_export(workflow, workflow.create(source)["id"])
     centre = (210, 297.5)
 
     stored = stored_words(workflow, project)
@@ -137,7 +137,7 @@ def test_a_page_displayed_with_rotate_gets_its_words_upright_in_their_boxes(tmp_
     # Problem spots keep their own reading (the scripted AI confirms them), so the text layer is Local OCR's.
     workflow = Workflow(ProjectStore(tmp_path / "library"), language=default_provider())
     source = columns_pdf(tmp_path / "sideways.pdf", rotation=rotation)
-    project = workflow.run(workflow.create(source)["id"])
+    project = run_and_export(workflow, workflow.create(source)["id"])
 
     stored = stored_words(workflow, project)
     with ocr_pdf(workflow, project) as document:

@@ -227,7 +227,8 @@ def test_the_listing_says_which_steps_have_a_preview_and_the_ui_serves_it(client
     listing = client.get("/api/projects").json()
 
     previews = {step["id"]: step["preview"] for step in listing["steps"]}
-    assert previews["import"] is True and previews["review"] is False
+    assert previews["import"] is True and previews["review"] is True
+    assert "review/queue" in client.get("/previews/review.js").text
     assert client.get("/previews/import.js").status_code == 200
     assert "pageViewer" in client.get("/viewer.js").text
 
@@ -239,6 +240,9 @@ def test_the_exported_ocr_pdf_is_listed_and_downloaded_under_a_name_derived_from
     assert client.get(f"{base}/outputs").json() == {"outputs": []}
 
     client.post(f"{base}/run")
+    workflow.wait(project["id"])
+    assert client.get(f"{base}/outputs").json() == {"outputs": []}  # the run stops at manual review
+    client.post(f"{base}/export")
     workflow.wait(project["id"])
 
     markdown, output = client.get(f"{base}/outputs").json()["outputs"]

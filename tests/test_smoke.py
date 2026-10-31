@@ -16,6 +16,7 @@ from pathlib import Path
 import pymupdf
 import pytest
 
+from fakes import run_and_export
 from ocrmaker.store import ProjectStore
 from ocrmaker.workflow import Workflow
 
@@ -29,7 +30,7 @@ def test_a_real_scan_goes_through_the_workflow_into_a_verified_ocr_pdf_and_a_run
     source = Path(SMOKE_PDF).expanduser()
     workflow = Workflow(ProjectStore(tmp_path / "library"), language=None)
 
-    project = workflow.run(workflow.create(source)["id"])
+    project = run_and_export(workflow, workflow.create(source)["id"])
 
     states = {step["id"]: step["state"] for step in project["steps"]}
     messages = {step["id"]: step["message"] for step in project["steps"] if step["message"]}

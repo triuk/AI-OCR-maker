@@ -6,7 +6,7 @@ import re
 import pymupdf
 import pytest
 
-from fakes import ScriptedProvider
+from fakes import ScriptedProvider, run_and_export
 from layout_pdfs import LEFT, RIGHT, Print, printed_pdf
 from pdfs import czech_font_buffer
 from ocrmaker.steps import implementations
@@ -140,7 +140,7 @@ def exported(tmp_path_factory):
     directory = tmp_path_factory.mktemp("article-text")
     provider = ScriptedProvider().on("reading_order", reading_order)
     workflow = Workflow(ProjectStore(directory / "library"), language=provider)
-    project = workflow.run(workflow.create(printed_pdf(directory / "zpravodaj-2000-05.pdf", PAGES))["id"])
+    project = run_and_export(workflow, workflow.create(printed_pdf(directory / "zpravodaj-2000-05.pdf", PAGES))["id"])
     return workflow, project, markdown(workflow, project)
 
 
@@ -242,7 +242,8 @@ def test_unclear_hyphens_are_decided_by_the_dictionary_and_the_documents_own_wor
         article(*(block["number"] for block in request.data["blocks"]))]})
     steps = implementations() | {"export": DictionaryExport(["sever", "jih", "zasedání"])}
     workflow = Workflow(ProjectStore(tmp_path / "library"), steps=steps, language=provider)
-    project = workflow.run(workflow.create(printed_pdf(tmp_path / "zpravodaj-2000-05.pdf", [UNCLEAR]))["id"])
+    project = run_and_export(
+        workflow, workflow.create(printed_pdf(tmp_path / "zpravodaj-2000-05.pdf", [UNCLEAR]))["id"])
     text = markdown(workflow, project)
 
     assert "ve směru sever-jih přes" in text          # both parts known, the joined word is not
@@ -254,7 +255,7 @@ def test_without_a_reading_order_each_page_is_written_in_recognition_order_and_n
     steps = {step: implementation for step, implementation in implementations().items()
              if step not in ("layout", "order")}
     workflow = Workflow(ProjectStore(tmp_path / "library"), steps=steps)
-    project = workflow.run(workflow.create(printed_pdf(tmp_path / "zpravodaj-2000-05.pdf", PAGES))["id"])
+    project = run_and_export(workflow, workflow.create(printed_pdf(tmp_path / "zpravodaj-2000-05.pdf", PAGES))["id"])
     text = markdown(workflow, project)
 
     assert re.findall(r"<!-- page [^\n]*-->", text) == ["<!-- page pdf=1 -->", "<!-- page pdf=2 -->"]

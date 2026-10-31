@@ -7,8 +7,12 @@
 //     draw(layer, overlay, page, svg) {},  // add SVG shapes in source page coordinates to `layer`
 //     describe(overlay, page) {},          // optional: a Czech line about the page shown in the toolbar
 //     legend: [{label, cls}],              // optional: overlay classes explained under the toolbar
+//     load(index) {},                      // optional: the overlay of a page (default: the step's overlay)
+//     select(element, page) {},            // optional: a click (not a drag) on an element with data-select
+//     onpage(page) {},                     // optional: called whenever another page is shown
 //   });
 //
+// It resolves to a handle {show(index), redraw(), page()} for screens that drive the viewer themselves.
 // Elements with a data-tip attribute show its text on hover; svg(tag, attrs, parent) creates elements.
 (function () {
   const NS = "http://www.w3.org/2000/svg";
@@ -111,7 +115,8 @@
       overlaySvg.replaceChildren();
       image.src = apiUrl(`/projects/${project.id}/pages/${index}/image`);
       if (mode) fit(mode); else apply();  // a page change keeps the user's own zoom and position
-      const overlay = await overlayOf(project, step, index);
+      if (options.onpage) options.onpage(page);
+      const overlay = options.load ? await options.load(index) : await overlayOf(project, step, index);
       if (ticket !== loading) return;
       // Everything a step draws is in source page coordinates; this group maps them onto the raster.
       const layer = svg("g", {transform: `matrix(${page.raster.to_raster.join(" ")})`, class: "overlay-layer"}, overlaySvg);
@@ -137,7 +142,8 @@
     let drag = null;
     stage.onpointerdown = event => {
       if (event.button !== 0) return;
-      drag = {x: event.clientX - tx, y: event.clientY - ty};
+      const selectable = event.target.closest && event.target.closest("[data-select]");
+      drag = {x: event.clientX - tx, y: event.clientY - ty, startX: event.clientX, startY: event.clientY, selectable};
       stage.setPointerCapture(event.pointerId);
       stage.classList.add("dragging");
     };
@@ -156,7 +162,13 @@
       tip.style.left = `${Math.min(event.clientX - rect.left + 14, rect.width - tip.offsetWidth - 4)}px`;
       tip.style.top = `${Math.min(event.clientY - rect.top + 16, rect.height - tip.offsetHeight - 4)}px`;
     };
-    stage.onpointerup = stage.onpointercancel = () => { drag = null; stage.classList.remove("dragging"); };
+    stage.onpointerup = event => {
+      // A click that did not move the page selects what it started on.
+      if (drag && drag.selectable && options.select && event.type === "pointerup"
+          && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 5) options.select(drag.selectable, page);
+      drag = null; stage.classList.remove("dragging");
+    };
+    stage.onpointercancel = () => { drag = null; stage.classList.remove("dragging"); };
     stage.onpointerleave = () => { tip.hidden = true; };
     stage.onkeydown = event => {
       const pan = 60;
@@ -174,6 +186,7 @@
     const resize = new ResizeObserver(() => { if (!container.isConnected) resize.disconnect(); else if (mode) fit(mode); });
     resize.observe(stage);
     await show(index);
+    return {show, redraw: () => show(index), page: () => index};
   }
 
   window.ocrmaker = Object.assign(window.ocrmaker || {}, {pageViewer, svg, box});

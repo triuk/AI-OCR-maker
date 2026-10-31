@@ -17,14 +17,14 @@ the front matter.
 
 Word text: both outputs take every word from `ExportStep.exported_words`, the one place where Export decides
 what a word says. Reconstruction records (AI reconstruction, Web lookup; `ocrmaker.transcription`) and manual
-corrections (#13, ADR 0004) are applied there.
+corrections (`ocrmaker.corrections`, ADR 0004; handed over in manual review's result) are applied there.
 """
 from __future__ import annotations
 
 import time
 from pathlib import Path
 
-from .. import articletext, hunspell, textlayer, transcription, verify
+from .. import articletext, corrections, hunspell, textlayer, transcription, verify
 from ..layout import LAYOUT_STEP, read_layout_page
 from ..pages import PREPARED_STEP, read_pages
 from ..reading_order import ORDER_FILE, ORDER_STEP
@@ -46,6 +46,49 @@ def output_names(source_name: str) -> dict[str, str]:
     return {"pdf": f"{stem}-ocr.pdf", "markdown": f"{stem}-ocr.md"}
 
 
+REVIEW_STEP = "review"
+
+
+def manual_corrections(ctx) -> list[dict]:
+    """The manual corrections manual review handed to this export (its result), or none without one."""
+    if not ctx.has_result(REVIEW_STEP):
+        return []
+    result = ctx.result(REVIEW_STEP)
+    return result.read_json(corrections.CORRECTIONS_FILE) if result.exists(corrections.CORRECTIONS_FILE) else []
+
+
+def reading_order(ctx) -> tuple[dict[int, dict], list[dict]]:
+    """Reading order's pages by index and its cross-page links; none without Layout and Reading order."""
+    if not (ctx.has_result(LAYOUT_STEP) and ctx.has_result(ORDER_STEP)):
+        return {}, []
+    order = ctx.result(ORDER_STEP).read_json(ORDER_FILE)
+    return {item["index"]: item for item in order.get("pages", [])}, order.get("links", [])
+
+
+def reading_articles(ctx, recognised: dict, order_pages: dict[int, dict]) -> list[dict]:
+    """A page's articles in reading order, as OCR word ids: [{"id", "kind", "continues", "blocks": [{"id",
+    "kind", "lines": [[word id, ...], ...]}]}].
+
+    Without a reading order the page is one article of one block holding Tesseract's lines. Words no block
+    holds (there should be none) are not lost: they end the page as one more article of one line.
+    """
+    index = recognised["index"]
+    if index not in order_pages:
+        return [{"id": f"p{index + 1}-text", "kind": "article", "continues": None, "blocks": [
+            {"id": f"p{index + 1}-text", "kind": "body",
+             "lines": [[word["id"] for word in line["words"]] for line in recognised["lines"]]}]}]
+    layout = read_layout_page(ctx.result(LAYOUT_STEP), index) or {"blocks": []}
+    blocks = {block["id"]: block for block in layout["blocks"]}
+    articles = [{**article, "blocks": [{"id": block, "kind": blocks[block]["kind"], "lines": blocks[block]["lines"]}
+                                       for block in article["blocks"]]} for article in order_pages[index]["articles"]]
+    placed = {word for block in layout["blocks"] for line in block["lines"] for word in line}
+    rest = [word["id"] for line in recognised["lines"] for word in line["words"] if word["id"] not in placed]
+    if rest:
+        articles.append({"id": f"p{index + 1}-rest", "kind": "article", "continues": None,
+                         "blocks": [{"id": f"p{index + 1}-rest", "kind": "body", "lines": [rest]}]})
+    return articles
+
+
 class ExportStep(Step):
     id = "export"
 
@@ -56,32 +99,24 @@ class ExportStep(Step):
         Each OCR word id maps to the words written in its place, in recognition order: the word itself with
         Local OCR's text, or what the reconstruction records settled (`ocrmaker.transcription`): the
         reconstructed text, the illegible marker, no word for a box merged into its neighbour, several words
-        for a split box. Manual corrections (#13, ADR 0004) are applied last, here. Expand a line of word ids
-        with `transcription.expand(words, ids)`.
+        for a split box. Manual corrections (`ocrmaker.corrections`, ADR 0004), as manual review handed them
+        over in its result, are applied last. Expand a line of word ids with `transcription.expand(words, ids)`.
         """
-        return transcription.page_words(ctx, recognised)
+        return corrections.apply(transcription.page_words(ctx, recognised), recognised, manual_corrections(ctx))
 
     def text_layer_plan(self, ctx: StepContext, pages: list[dict]) -> list[dict]:
         """Per page, the lines of words in the order they are written: the reading order (articles, their
         blocks, the blocks' lines), or Tesseract's recognition order when there is no reading order."""
         ocr = ctx.result(OCR_STEP)
-        ordered = ctx.has_result(LAYOUT_STEP) and ctx.has_result(ORDER_STEP)
-        order = ctx.result(ORDER_STEP).read_json(ORDER_FILE) if ordered else None
-        order_pages = {item["index"]: item for item in (order or {}).get("pages", [])}
+        order_pages, _ = reading_order(ctx)
         plan = []
         for page in pages:
             recognised = read_page(ocr, page["index"]) or {"index": page["index"], "lines": []}
             words = self.exported_words(ctx, recognised)
-            lines = [expand(words, (word["id"] for word in line["words"])) for line in recognised["lines"]]
+            lines = [expand(words, line) for article in reading_articles(ctx, recognised, order_pages)
+                     for block in article["blocks"] for line in block["lines"]]
             if page["index"] in order_pages:
-                layout = read_layout_page(ctx.result(LAYOUT_STEP), page["index"]) or {"blocks": []}
-                blocks = {block["id"]: block for block in layout["blocks"]}
-                lines = [expand(words, line) for article in order_pages[page["index"]]["articles"]
-                         for block in article["blocks"] for line in blocks[block]["lines"]]
-                # Words no block holds (there should be none) still reach the text layer, at the end.
-                placed = {word for block in layout["blocks"] for line in block["lines"] for word in line}
-                rest = expand(words, (word for word in words if word not in placed))
-                lines = [line for line in lines if line] + ([rest] if rest else [])
+                lines = [line for line in lines if line]
             plan.append({"index": page["index"], "lines": lines})
         return plan
 
@@ -91,34 +126,20 @@ class ExportStep(Step):
         Without a reading order every page is one article of one block holding Tesseract's lines.
         """
         ocr = ctx.result(OCR_STEP)
-        ordered = ctx.has_result(LAYOUT_STEP) and ctx.has_result(ORDER_STEP)
-        order = ctx.result(ORDER_STEP).read_json(ORDER_FILE) if ordered else {}
-        order_pages = {item["index"]: item for item in order.get("pages", [])}
+        order_pages, links = reading_order(ctx)
         result = []
         for page in pages:
             index = page["index"]
             recognised = read_page(ocr, index) or {"index": index, "lines": []}
             words = self.exported_words(ctx, recognised)
-            fallback = [{"id": f"p{index + 1}-text", "kind": "article", "continues": None, "blocks": [
-                {"id": f"p{index + 1}-text", "kind": "body",
-                 "lines": [expand(words, (word["id"] for word in line["words"])) for line in recognised["lines"]]}]}]
-            if index not in order_pages:
-                result.append({"index": index, "articles": fallback})
-                continue
-            layout = read_layout_page(ctx.result(LAYOUT_STEP), index) or {"blocks": []}
-            blocks = {block["id"]: block for block in layout["blocks"]}
-            articles = [{**article, "blocks": [
-                {"id": block, "kind": blocks[block]["kind"],
-                 "lines": [expand(words, line) for line in blocks[block]["lines"]]}
-                for block in article["blocks"]]} for article in order_pages[index]["articles"]]
-            # Words no block holds (there should be none) are not lost: they end the page as one more article.
-            placed = {word for block in layout["blocks"] for line in block["lines"] for word in line}
-            rest = expand(words, (word for word in words if word not in placed))
-            if rest:
-                articles.append({"id": f"p{index + 1}-rest", "kind": "article", "continues": None,
-                                 "blocks": [{"id": f"p{index + 1}-rest", "kind": "body", "lines": [rest]}]})
+            articles = [{**article, "blocks": [{**block, "lines": [expand(words, line) for line in block["lines"]]}
+                                               for block in article["blocks"]]}
+                        for article in reading_articles(ctx, recognised, order_pages)]
+            # The words no block holds may all write nothing; then there is no article for them.
+            articles = [article for article in articles if article["id"] != f"p{index + 1}-rest"
+                        or any(line for block in article["blocks"] for line in block["lines"])]
             result.append({"index": index, "articles": articles})
-        return result, order.get("links", [])
+        return result, links
 
     def dictionary(self, ctx: StepContext):
         """The dictionary deciding unclear line-end hyphens in the article text: known(word) -> bool.

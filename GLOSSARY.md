@@ -84,6 +84,10 @@ _Avoid_: Visualization, debug view
 **Manual review**:
 The step in which the user resolves remaining illegible markers and checks the automatic result.
 
+**Review queue**:
+The list manual review leads the user through: every illegible marker still in force, with its image crop, surrounding text, partial reading and the AI candidate.
+_Avoid_: Todo list, worklist
+
 **Manual correction**:
 A change the user makes during manual review. It is kept apart from step results and applied when the project is exported, so it never causes earlier steps to run again. Running an earlier step again discards all manual corrections.
 _Avoid_: Edit, fix (too generic)

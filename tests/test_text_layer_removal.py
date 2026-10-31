@@ -71,6 +71,8 @@ def test_removing_an_invisible_text_layer_continues_to_an_ocr_pdf_without_duplic
     project = workflow.run(workflow.create(source)["id"])
 
     project = workflow.remove_text_layer(project["id"])
+    assert step(project, "review")["state"] == "pending"  # the run went on up to manual review
+    project = workflow.export(project["id"])
 
     assert [step(project, s)["state"] for s in ("import", "ocr", "export")] == ["done", "done", "done"]
     clean = workflow.base_pdf(project["id"])
@@ -118,6 +120,8 @@ def test_the_removal_is_offered_and_chosen_through_the_api(client, workflow, tmp
     assert step(client.get(f"/api/projects/{project_id}").json())["action"] == "remove_text_layer"
 
     accepted = client.post(f"/api/projects/{project_id}/text-layer/remove")
+    workflow.wait(project_id, timeout=30)
+    client.post(f"/api/projects/{project_id}/export")
     workflow.wait(project_id, timeout=30)
 
     assert accepted.status_code == 202

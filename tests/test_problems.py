@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pytest
 
+from fakes import run_and_export
 from ocrmaker.step import Step
 from ocrmaker.steps import implementations
 from ocrmaker.store import ProjectStore
@@ -19,7 +20,7 @@ def binding(tmp_path_factory):
     directory = tmp_path_factory.mktemp("binding")
     workflow = Workflow(ProjectStore(directory / "library"))
     source = binding_pdf(directory / "zpravodaj-2000-05.pdf", band=BAND)
-    project = workflow.run(workflow.create(source)["id"])
+    project = run_and_export(workflow, workflow.create(source)["id"])
     return workflow, project
 
 

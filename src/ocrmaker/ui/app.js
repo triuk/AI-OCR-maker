@@ -52,7 +52,7 @@ async function api(path, method = "GET", body) {
   return response.json();
 }
 async function act(fn) { try { await fn(); } catch (e) { toast(e.message); } }
-window.ocrmaker = {api, apiUrl, esc, plural, toast};
+window.ocrmaker = {api, apiUrl, esc, plural, toast, refresh: () => refresh()};
 
 function current() { return projects.find(p => p.id === currentId) || null; }
 function projectStatus(p) {
@@ -145,14 +145,34 @@ function renderStepPreview(p) {
   container.innerHTML = `<h2>${esc(step.label)}</h2><div class="facts">${esc(facts.join(" · "))}</div>
     ${step.message ? `<div class="notice ${step.state === "failed" ? "error" : ""}">${esc(step.message)}</div>` : ""}<div class="preview-body"></div>`;
   const body = container.querySelector(".preview-body");
+  // Manual review opens as soon as automation has done its part, whatever its own state (it runs at export).
+  const ready = ["done", "warning"].includes(step.state) || (step.manual && reviewReady(p, step));
   if (!step.implemented) body.innerHTML = `<p class="placeholder">Tento krok zatím není k dispozici.</p>`;
-  else if (!["done", "warning"].includes(step.state)) body.innerHTML = `<p class="placeholder">Náhled bude k dispozici po dokončení kroku.</p>`;
+  else if (step.manual && !ready) body.innerHTML = `<p class="placeholder">Ruční kontrola bude k dispozici po dokončení automatického zpracování.</p>`;
+  else if (!ready) body.innerHTML = `<p class="placeholder">Náhled bude k dispozici po dokončení kroku.</p>`;
   else act(async () => {
     const preview = await loadPreview(step.id);
     if (key !== previewKey) return;  // another step or state was opened meanwhile
     if (!preview) body.innerHTML = `<p class="placeholder">Tento krok zatím nemá náhled.</p>`;
     else await preview(body, p, step);
   });
+}
+
+// Every implemented step before the manual one has finished and nothing runs: the user can review.
+function reviewReady(p, step) {
+  const before = p.steps.slice(0, p.steps.indexOf(step));
+  return !p.running && before.every(s => !s.implemented || ["done", "warning"].includes(s.state));
+}
+
+// When a run of the open project ends at manual review, the review opens by itself.
+let wasRunning = {};
+function openReviewAfterRun() {
+  const p = current();
+  if (!p) return;
+  const review = p.steps.find(s => s.manual && s.implemented);
+  if (wasRunning[p.id] && !p.running && review && review.state === "pending" && reviewReady(p, review)
+      && selectedStep !== review.id) selectedStep = review.id;
+  wasRunning = Object.fromEntries(projects.map(project => [project.id, project.running]));
 }
 
 async function refresh() {
@@ -163,6 +183,7 @@ async function refresh() {
     projects = data.projects; steps = data.steps; choices = data.choices;
     if (currentId && !current()) { currentId = null; selectedStep = null; }
     $("connection").textContent = "Připojeno"; $("connection").className = "connection online";
+    openReviewAfterRun();
     renderProjects(); renderWorkspace();
   } catch (e) {
     $("connection").textContent = "Aplikace neodpovídá"; $("connection").className = "connection offline";

@@ -11,10 +11,12 @@ import sys
 import threading
 import time
 import traceback
+import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from . import existing_text, providers, report
+from . import corrections as manual
+from . import existing_text, providers, report, review
 from . import settings as project_settings
 from .diagnostics import Diagnostics, new_run_id
 from .errors import Conflict, ConfirmationRequired, StepError, StepInterrupted
@@ -28,6 +30,7 @@ from .store import ProjectStore, now
 
 PENDING, RUNNING, DONE, WARNING, FAILED = "pending", "running", "done", "warning", "failed"
 FINISHED = (DONE, WARNING)
+REVIEW_STEP = "review"
 REMOVE_ACTION = existing_text.REMOVE_ACTION
 # Progress is written to the project document at most this often (seconds).
 PROGRESS_INTERVAL = 0.25
@@ -37,6 +40,22 @@ FIRST_MANUAL = next(index for index, definition in enumerate(STEPS) if definitio
 CHECK_INSTRUCTIONS = "This is a connection check. Answer with the JSON object {\"ok\": true} and nothing else."
 CHECK_SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"],
                 "additionalProperties": False}
+
+
+class _Results:
+    """Committed step results as a step context offers them (has_result, result), for the review service."""
+
+    def __init__(self, results: Callable[[str], StepResult | None]):
+        self._results = results
+
+    def has_result(self, step_id: str) -> bool:
+        return self._results(step_id) is not None
+
+    def result(self, step_id: str) -> StepResult:
+        result = self._results(step_id)
+        if result is None:
+            raise KeyError("Výsledek kroku zatím neexistuje.")
+        return result
 
 
 def _pending_step() -> dict:
@@ -253,6 +272,72 @@ class Workflow:
         self.store.get(project_id)
         return [{"id": run_id} for run_id in self._reports(project_id).run_ids()]
 
+    # Manual review (ocrmaker.review): reading the queue and the text, recording manual corrections ---------
+
+    def review_queue(self, project_id: str) -> dict:
+        """The review queue: every illegible marker in force with its context, hint, candidate and correction."""
+        return review.queue(self._review(project_id), self.store.corrections(project_id))
+
+    def review_page(self, project_id: str, page: int) -> dict:
+        """A page's text as Export would write it now, word by word with each word's origin."""
+        return review.page_view(self._review(project_id), page, self.store.corrections(project_id))
+
+    def review_crop(self, project_id: str, page: int, word_id: str) -> bytes:
+        """A PNG crop of the working raster around a word (a queue item's id, say), the word outlined."""
+        return review.crop(self._review(project_id), page, word_id)
+
+    def corrections(self, project_id: str) -> list[dict]:
+        """The project's manual corrections (format in ocrmaker.corrections), in the order they were made."""
+        self.store.get(project_id)
+        return self.store.corrections(project_id)
+
+    def correct(self, project_id: str, page: int, word_id: str, text: str, *, source: str = "word") -> dict | None:
+        """Set what is written for a word (any written word of the page, or a queue item's id).
+
+        The correction covers the word's whole group (a reconstruction record's ids) and replaces any earlier
+        correction there. It is saved at once and runs no step (ADR 0004); Export applies it. Text equal to
+        what the automatic steps wrote removes the correction instead. Returns the stored correction or None.
+        """
+        if source not in ("queue", "word"):
+            raise ValueError("Neznámý původ ruční opravy.")
+        lock = self._lock(project_id)
+        try:
+            stored = self.store.corrections(project_id)
+            made = review.correction(self._review(project_id), page, word_id, text, stored)
+            overlapping = [item for item in stored if item.get("kind") == manual.TEXT and item["page"] == page
+                           and set(item["ids"]) & set(made["ids"])]
+            correction = None
+            if made["text"] != made["previous"]:
+                stamp = now()
+                first = overlapping[0] if overlapping else None
+                correction = {"id": first["id"] if first else uuid.uuid4().hex[:12], **made, "source": source,
+                              "created": first["created"] if first else stamp, "updated": stamp}
+            kept = []
+            for item in stored:
+                if item in overlapping:
+                    if item is overlapping[0] and correction:
+                        kept.append(correction)
+                    continue
+                kept.append(item)
+            if correction and not overlapping:
+                kept.append(correction)
+            self.store.write_corrections(project_id, kept)
+            return correction
+        finally:
+            lock.release()
+
+    def revert_correction(self, project_id: str, correction_id: str) -> None:
+        """Remove one manual correction; the word is exported as the automatic steps wrote it again."""
+        lock = self._lock(project_id)
+        try:
+            stored = self.store.corrections(project_id)
+            kept = [item for item in stored if item.get("id") != correction_id]
+            if len(kept) == len(stored):
+                raise KeyError("Ruční oprava neexistuje.")
+            self.store.write_corrections(project_id, kept)
+        finally:
+            lock.release()
+
     # AI ----------------------------------------------------------------------------------------------
 
     def check_ai(self, project_id: str, changes: dict | None = None) -> dict:
@@ -434,7 +519,8 @@ class Workflow:
                                                                                      **data)),
             results=lambda step_id: self.result(project_id, step_id), progress=progress, stopped=stop.is_set,
             record=lambda kind, **data: diagnostics.record(run_id, kind, **data),
-            source_name=document["source"]["file_name"])
+            source_name=document["source"]["file_name"],
+            corrections=lambda: self.store.corrections(project_id))
         error = action = None
         try:
             step.run(context)
@@ -501,6 +587,18 @@ class Workflow:
             return lock.acquire()
         except BlockingIOError as exc:
             raise Conflict("Projekt se právě zpracovává. Nejprve zpracování zastavte.") from exc
+
+    def _review(self, project_id: str) -> _Results:
+        """The results manual review reads, once every automatic step before it has finished."""
+        document = self.store.get(project_id)
+        if REVIEW_STEP not in self.steps:
+            raise ValueError("Ruční kontrola zatím není k dispozici.")
+        unfinished = [d.label for d in STEPS[:FIRST_MANUAL]
+                      if d.id in self.steps and document["steps"][d.id]["state"] not in FINISHED]
+        if unfinished:
+            raise ValueError("Ruční kontrola bude k dispozici po dokončení automatického zpracování "
+                             f"(chybí: {', '.join(unfinished)}).")
+        return _Results(lambda step_id: self.result(project_id, step_id))
 
     @staticmethod
     def _step_index(step_id: str) -> int:
