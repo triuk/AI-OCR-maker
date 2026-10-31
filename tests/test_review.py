@@ -179,6 +179,20 @@ def test_a_correction_of_a_split_word_covers_the_whole_group(tmp_path, language_
     assert "opravou" in exported_words and "opravu" not in exported_words
 
 
+def test_a_spot_web_lookup_settled_leaves_the_queue_and_shows_as_settled_by_the_web(tmp_path, language_provider):
+    from test_lookup import found
+    language_provider.on("reconstruction", doubtful)
+    language_provider.on("lookup", found({"čtvrtek": {"words": ["čtvrtek"]}}))
+    workflow = Workflow(ProjectStore(tmp_path / "library"), steps={**implementations(), "ocr": PrintedOcr(DAMAGED)},
+                        language=language_provider)
+    project = workflow.run(workflow.create(printed_text_pdf(tmp_path / "zpravodaj.pdf", TEXT))["id"])
+
+    assert [item["candidate"] for item in workflow.review_queue(project["id"])["items"]] == ["kronikářem"]
+    words = [word for article in workflow.review_page(project["id"], 0)["articles"] for block in article["blocks"]
+             for line in block["lines"] for word in line]
+    assert {word["text"]: word["origin"] for word in words}["čtvrtek"] == "web"
+
+
 @pytest.fixture
 def api(reviewed):
     from fastapi.testclient import TestClient

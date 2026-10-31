@@ -46,10 +46,10 @@ def test_run_goes_through_import_preparation_local_ocr_and_export(columns):
     workflow, project, _ = columns
 
     # Without an AI provider the reading order is geometric, with a warning; the clean page has no problem
-    # spots, so AI reconstruction has nothing to ask.
+    # spots, so AI reconstruction and Web lookup have nothing to ask.
     assert states(project) == {"import": "done", "prepare": "done", "ocr": "done", "layout": "done",
                                "order": "warning", "problems": "done", "reconstruct": "done",
-                               "lookup": "pending", "review": "done", "export": "done"}
+                               "lookup": "done", "review": "done", "export": "done"}
     outputs = workflow.outputs(project["id"])
     assert [output["name"] for output in outputs] == ["zpravodaj-2000-05-ocr.md", "zpravodaj-2000-05-ocr.pdf"]
     with pymupdf.open(workflow.output(project["id"], "zpravodaj-2000-05-ocr.pdf")) as document:

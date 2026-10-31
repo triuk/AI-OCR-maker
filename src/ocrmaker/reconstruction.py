@@ -274,6 +274,23 @@ def validate(answer, spots: dict[str, dict], positions: dict[str, tuple[int, int
     return problems
 
 
+def place(ink: inkgaps.InkPage | None, raster: dict, line: dict, words: dict[str, dict], ids: list[str],
+          texts: list[str]) -> list[dict]:
+    """The words written in place of consecutive marked ids of one OCR line: [{"id", "text", "bbox"}].
+
+    One word for one box keeps the box; anything else (a merge, a split) gets boxes measured on the ink
+    (`measure_words`). Split parts beyond the ids get the ids `<first id>-N`. ink may be None when only
+    one-to-one words are placed.
+    """
+    if len(ids) == 1 and len(texts) == 1:
+        return [{"id": ids[0], "text": texts[0], "bbox": words[ids[0]]["bbox"]}]
+    others = [word["bbox"] for word in line["words"] if word["id"] not in ids]
+    boxes = measure_words(ink, raster["to_raster"], raster["to_source"], [words[word_id]["bbox"] for word_id in ids],
+                          line["bbox"], others, texts)
+    names = ids[:len(texts)] + [f"{ids[0]}-{number}" for number in range(len(ids) + 1, len(texts) + 1)]
+    return [{"id": name, "text": text, "bbox": box} for name, text, box in zip(names, texts, boxes)]
+
+
 def measure_words(ink: inkgaps.InkPage, to_raster, to_source, boxes: list[list[float]], line_box: list[float],
                   others: list[list[float]], texts: list[str]) -> list[list[float]]:
     """Word boxes (source page coordinates) for texts printed where the given boxes lie, measured on the ink.

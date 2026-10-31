@@ -235,6 +235,15 @@ dialog::backdrop { background: #12232f55; backdrop-filter: blur(3px); }
 .legend-item i.rec-accepted { border-color: #2f9e44; background: #2f9e4433; }
 .legend-item i.rec-publisher { border-color: #e8590c; background: #e8590c33; border-style: dashed; }
 .legend-item i.rec-unresolved { border-color: #c92a2a; background: #c92a2a40; }
+/* Web lookup preview */
+.lookup-web { fill: #1c7ed633; stroke: #1c7ed6; }
+.legend-item i.lookup-web { border-color: #1c7ed6; background: #1c7ed633; }
+.lookup-list h3 { font-size: 1rem; margin: 1rem 0 .4rem; }
+.lookup-list ul { margin: 0; padding-left: 1.2rem; }
+.lookup-list li { margin-bottom: .6rem; overflow-wrap: anywhere; }
+.lookup-list .muted { color: var(--muted); font-size: .9em; }
+label.check { display: flex; align-items: center; gap: 8px; }
+label.check > input { width: auto; margin: 0; }
 
 /* Manual review: the scan on the left, the queue and the page text on the right. */
 .review { display: grid; grid-template-columns: minmax(0, 3fr) minmax(320px, 2fr); gap: 18px; align-items: start; }
