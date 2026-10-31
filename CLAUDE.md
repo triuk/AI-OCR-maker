@@ -57,6 +57,8 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents
   `answer`, `sources`) only for the spots it settles; the setting `web_lookup` switches it off.
 - Manual review (`src/ocrmaker/steps/review_step.py`) is the manual step: Run stops before it, Export runs it and
   then Export. The review service (`src/ocrmaker/review.py`: queue, page text, crops) backs `Workflow.review_queue`,
-  `review_page`, `review_crop`, `correct` and `revert_correction`; manual corrections (format in
-  `src/ocrmaker/corrections.py`) are saved at once, run no step, and reach Export through the Review step's result.
+  `review_page`, `review_crop`, `correct` and `revert_correction`, plus `suggestions`/`accept_suggestion`
+  (propagation), `add_note`/`edit_note` (region notes) and `reorder_articles`; manual corrections (format and kinds
+  `text`, `note`, `order` in `src/ocrmaker/corrections.py`) are saved at once, run no step, and reach Export through
+  the Review step's result. A manual article order is applied in `export_step.reading_articles`.
   Seam 1 tests that need the outputs run and then export (`tests/fakes.py::run_and_export`).

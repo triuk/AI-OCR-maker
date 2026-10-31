@@ -10,6 +10,9 @@
 //     load(index) {},                      // optional: the overlay of a page (default: the step's overlay)
 //     select(element, page) {},            // optional: a click (not a drag) on an element with data-select
 //     onpage(page) {},                     // optional: called whenever another page is shown
+//     sketching() {},                      // optional: true while a drag should draw a region, not pan
+//     region(bbox, page) {},               // optional: a region dragged while sketching, [x0, y0, x1, y1]
+//                                          // in source page coordinates
 //   });
 //
 // It resolves to a handle {show(index), redraw(), page()} for screens that drive the viewer themselves.
@@ -139,15 +142,40 @@
       zoom(Math.pow(STEP, -Math.sign(event.deltaY)), event.clientX - rect.left, event.clientY - rect.top);
     }, {passive: false});
     stage.ondblclick = () => fit(mode === "fit" ? "actual" : "fit");
-    let drag = null;
+    let drag = null, sketch = null;
+    // A stage point in raster pixels, and a raster rectangle in source page coordinates.
+    const rasterPoint = event => {
+      const rect = stage.getBoundingClientRect();
+      return [(event.clientX - rect.left - tx) / scale, (event.clientY - rect.top - ty) / scale];
+    };
+    function toSource(x0, y0, x1, y1) {
+      const [a, b, c, d, e, f] = page.raster.to_source;
+      const corners = [[x0, y0], [x1, y0], [x0, y1], [x1, y1]].map(([x, y]) => [a * x + c * y + e, b * x + d * y + f]);
+      const xs = corners.map(point => point[0]), ys = corners.map(point => point[1]);
+      const inside = (value, top) => Math.round(Math.min(Math.max(value, 0), top) * 100) / 100;
+      return [inside(Math.min(...xs), page.width), inside(Math.min(...ys), page.height),
+              inside(Math.max(...xs), page.width), inside(Math.max(...ys), page.height)];
+    }
     stage.onpointerdown = event => {
       if (event.button !== 0) return;
+      if (options.sketching && options.sketching() && page) {
+        const [x, y] = rasterPoint(event);
+        sketch = {x, y, rect: svg("rect", {x, y, width: 0, height: 0, class: "viewer-sketch"}, overlaySvg)};
+        stage.setPointerCapture(event.pointerId);
+        return;
+      }
       const selectable = event.target.closest && event.target.closest("[data-select]");
       drag = {x: event.clientX - tx, y: event.clientY - ty, startX: event.clientX, startY: event.clientY, selectable};
       stage.setPointerCapture(event.pointerId);
       stage.classList.add("dragging");
     };
     stage.onpointermove = event => {
+      if (sketch) {
+        const [x, y] = rasterPoint(event);
+        Object.entries({x: Math.min(x, sketch.x), y: Math.min(y, sketch.y), width: Math.abs(x - sketch.x),
+                        height: Math.abs(y - sketch.y)}).forEach(([name, value]) => sketch.rect.setAttribute(name, value));
+        return;
+      }
       if (drag) {
         tx = event.clientX - drag.x; ty = event.clientY - drag.y; mode = null;
         apply();
@@ -163,12 +191,26 @@
       tip.style.top = `${Math.min(event.clientY - rect.top + 16, rect.height - tip.offsetHeight - 4)}px`;
     };
     stage.onpointerup = event => {
+      if (sketch) {
+        const [x, y] = rasterPoint(event);
+        const {width, height} = page.raster;
+        const clamp = (value, top) => Math.min(Math.max(value, 0), top);
+        const [x0, x1] = [clamp(Math.min(x, sketch.x), width), clamp(Math.max(x, sketch.x), width)];
+        const [y0, y1] = [clamp(Math.min(y, sketch.y), height), clamp(Math.max(y, sketch.y), height)];
+        sketch.rect.remove(); sketch = null;
+        // A region smaller than a few screen pixels is a slip, not a region.
+        if ((x1 - x0) * scale >= 6 && (y1 - y0) * scale >= 6 && options.region) options.region(toSource(x0, y0, x1, y1), page);
+        return;
+      }
       // A click that did not move the page selects what it started on.
       if (drag && drag.selectable && options.select && event.type === "pointerup"
           && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 5) options.select(drag.selectable, page);
       drag = null; stage.classList.remove("dragging");
     };
-    stage.onpointercancel = () => { drag = null; stage.classList.remove("dragging"); };
+    stage.onpointercancel = () => {
+      drag = null; stage.classList.remove("dragging");
+      if (sketch) { sketch.rect.remove(); sketch = null; }
+    };
     stage.onpointerleave = () => { tip.hidden = true; };
     stage.onkeydown = event => {
       const pan = 60;

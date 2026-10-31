@@ -85,9 +85,15 @@ _Avoid_: Visualization, debug view
 The step in which the user resolves remaining illegible markers and checks the automatic result.
 
 **Review queue**:
-The list manual review leads the user through: every illegible marker still in force, with its image crop, surrounding text, partial reading and the AI candidate.
+The list manual review leads the user through: every illegible marker still in force, with its image crop, surrounding text, partial reading and the AI candidate. It can optionally continue through the accepted reconstructions, for spot checks.
 _Avoid_: Todo list, worklist
 
+**Propagation suggestion**:
+The text of an illegible marker the user has resolved, offered for another illegible marker that matches it by partial reading or by context. Accepting it is one action and makes an ordinary manual correction.
+
+**Region note**:
+A note the user attaches to a region dragged on the page during manual review. It is kept with the manual corrections and listed in the report; it changes no text.
+
 **Manual correction**:
-A change the user makes during manual review. It is kept apart from step results and applied when the project is exported, so it never causes earlier steps to run again. Running an earlier step again discards all manual corrections.
+A change the user makes during manual review: a word's text (typed, or an accepted propagation suggestion), a region note, or a page's article order. It is kept apart from step results and applied when the project is exported, so it never causes earlier steps to run again. Running an earlier step again discards all manual corrections.
 _Avoid_: Edit, fix (too generic)

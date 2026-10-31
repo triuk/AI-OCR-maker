@@ -7,9 +7,10 @@ the reconstruction records of every record step (`ocrmaker.transcription`, so We
 here as soon as it writes them) and the manual corrections applied, in reading order.
 
 Queue (`queue`): one item per illegible marker, i.e. per reconstruction record in force with status
-"unresolved", page by page in reading order:
+"unresolved", page by page in reading order; optionally followed by the accepted reconstructions:
 
     {"id": "p1-w30",                 # the group's first OCR word id: what `correction` and the crop take
+     "kind": "marker",               # or "reconstruction": an accepted record, listed for a spot check
      "page": 0, "ids": ["p1-w30"],   # 0-based page index; the OCR word ids the marker stands for
      "status": "unresolved", "reason": "low_confidence", "source": "ai",   # from the record
      "text": "[NEČITELNÉ]",          # what the export writes there now (a correction's text once corrected)
@@ -17,15 +18,25 @@ Queue (`queue`): one item per illegible marker, i.e. per reconstruction record i
      "candidate": "čtvrtek" | null,  # the last automatic attempt's words, joined
      "confidence": 40.0 | null, "bbox": [x0, y0, x1, y1],                  # the group's box, source page coords
      "context": {"before": "... Ve", "after": "proběhne beseda ..."},       # the neighbouring written words
-     "correction": {...} | null}     # the manual correction made there, if any
+     "correction": {...} | null,     # the manual correction made there, if any
+     "suggestion": {"text", "correction", "match"} | null}   # propagation (markers without a correction):
+                                     # the text of a manually resolved marker this one matches, the id of
+                                     # that correction, and how it matches: "reading" or "context"
+
+Propagation: an open marker matches a resolved one by partial reading when its hint equals the resolved
+marker's hint, is a part (MIN_PARTIAL letters or more) of the resolved text or is similar to it
+(SIMILAR_READING), or when the AI's candidate is the resolved text; by context when the nearest written word
+on both sides is the same, or the two nearest words on one side (case and surrounding punctuation ignored).
+Accepting a suggestion stores an ordinary text correction with source "suggestion".
 
 Page view (`page_view`): a page's text in reading order, every written word with the OCR word id a
 correction of it takes (`target`) and where its text comes from (`origin`: "ocr", "ai", "publisher", "web",
-"marker" or "manual").
+"marker" or "manual"), plus the page's region notes (`notes`, as stored in ocrmaker.corrections).
 """
 from __future__ import annotations
 
 import tempfile
+from difflib import SequenceMatcher
 from pathlib import Path
 
 from . import corrections as layer
@@ -37,6 +48,13 @@ from .words import OCR_STEP, read_page
 
 # Written words shown before and after a queue item.
 CONTEXT_WORDS = 12
+# Queue item kinds: an illegible marker, or an accepted reconstruction shown for a spot check.
+MARKER_ITEM, RECONSTRUCTION_ITEM = "marker", "reconstruction"
+# Propagation: a partial reading this long counts when the resolved text contains it; a full-length reading
+# counts when it is this similar to the resolved text (difflib ratio, OCR substitutions).
+MIN_PARTIAL = 3
+SIMILAR_READING = 0.75
+PUNCTUATION = ".,;:!?…\"'„“”‚‘’»«()[]-–—"
 
 
 class Page:
@@ -53,7 +71,7 @@ class Page:
         self.automatic = transcription.page_words(ctx, self.recognised)
         self.words = layer.apply(self.automatic, self.recognised, corrections)
         order_pages = reading_order(ctx)[0] if order_pages is None else order_pages
-        self.articles = reading_articles(ctx, self.recognised, order_pages)
+        self.articles = reading_articles(ctx, self.recognised, order_pages, corrections)
         self.sequence = [word_id for article in self.articles for block in article["blocks"]
                          for line in block["lines"] for word_id in line]
         self.position = {word_id: number for number, word_id in enumerate(self.sequence)}
@@ -108,31 +126,97 @@ def page_count(ctx) -> int:
     return len(read_pages(ctx.result(PREPARED_STEP))) if ctx.has_result(PREPARED_STEP) else 0
 
 
-def queue(ctx, corrections: list[dict]) -> dict:
-    """The review queue: every illegible marker in force (see the module docstring), and its counts."""
-    items = []
+def queue(ctx, corrections: list[dict], reconstructions: bool = False) -> dict:
+    """The review queue: every illegible marker in force (see the module docstring), and its counts.
+
+    With reconstructions, the accepted reconstructions (every other record in force) follow the markers, page
+    by page in reading order, as items of kind "reconstruction" for a spot check; counts then has
+    "reconstructions" too. Markers and their counts are the same either way.
+    """
+    markers, accepted = [], []
     if ctx.has_result(OCR_STEP):
         order_pages = reading_order(ctx)[0]
         for index in range(page_count(ctx)):
             page = Page(ctx, index, corrections, order_pages)
-            found = [_item(page, record) for record in page.records if record["status"] == UNRESOLVED]
-            items += sorted(found, key=lambda item: min((page.position.get(i, len(page.sequence))
-                                                         for i in item["ids"]), default=0))
-    corrected = sum(item["correction"] is not None for item in items)
-    return {"items": items, "counts": {"markers": len(items), "corrected": corrected,
-                                       "remaining": len(items) - corrected,
-                                       "corrections": len(layer.text_corrections(corrections))}}
+
+            def ordered(found: list[dict]) -> list[dict]:
+                return sorted(found, key=lambda item: min((page.position.get(i, len(page.sequence))
+                                                           for i in item["ids"]), default=0))
+            markers += ordered([_item(page, record, MARKER_ITEM) for record in page.records
+                                if record["status"] == UNRESOLVED])
+            if reconstructions:
+                accepted += ordered([_item(page, record, RECONSTRUCTION_ITEM) for record in page.records
+                                     if record["status"] != UNRESOLVED])
+    _suggest(markers)
+    corrected = sum(item["correction"] is not None for item in markers)
+    counts = {"markers": len(markers), "corrected": corrected, "remaining": len(markers) - corrected,
+              "corrections": len(layer.text_corrections(corrections))}
+    if reconstructions:
+        counts["reconstructions"] = len(accepted)
+    return {"items": markers + accepted, "counts": counts}
 
 
-def _item(page: Page, record: dict) -> dict:
+def _item(page: Page, record: dict, kind: str) -> dict:
     ids = [word_id for word_id in record["ids"] if word_id in page.ocr]
     correction = next((page.correction_of[word_id] for word_id in ids if word_id in page.correction_of), None)
-    return {"id": ids[0], "page": page.index, "ids": ids, "status": record["status"], "reason": record.get("reason"),
+    return {"id": ids[0], "kind": kind, "page": page.index, "ids": ids, "status": record["status"], "reason": record.get("reason"),
             "source": record.get("source"), "text": page.text(ids),
             "hint": " ".join(page.ocr[word_id]["text"] for word_id in ids if page.ocr[word_id]["text"]),
             "candidate": " ".join(record["candidate"]) if record.get("candidate") else None,
             "confidence": record.get("confidence"), "bbox": page.box(ids), "context": page.context(ids),
-            "correction": correction}
+            "correction": correction, "suggestion": None}
+
+
+def _plain(text: str) -> str:
+    """A word or reading compared for propagation: case folded, without surrounding punctuation."""
+    return text.casefold().strip(PUNCTUATION)
+
+
+def _neighbours(context: dict) -> tuple[list[str], list[str]]:
+    """The two written words nearest before and after a queue item, plain; the illegible marker is no word."""
+    def plain(words: list[str]) -> list[str]:
+        return [_plain(word) if word != transcription.MARKER else None for word in words]
+    return plain(context["before"].split()[-2:]), plain(context["after"].split()[:2])
+
+
+def _reading_matches(item: dict, resolved: dict, text: str) -> bool:
+    """Whether an open marker's partial reading (or the AI's candidate) fits a resolved marker's text."""
+    hint, text = _plain(item["hint"]), _plain(text)
+    if item["candidate"] and _plain(item["candidate"]) == text:
+        return True
+    if not hint:
+        return False
+    return (hint == _plain(resolved["hint"]) or (len(hint) >= MIN_PARTIAL and hint in text)
+            or SequenceMatcher(None, hint, text).ratio() >= SIMILAR_READING)
+
+
+def _context_matches(item: dict, resolved: dict) -> bool:
+    """Whether an open marker stands in the same phrase as a resolved one: the same nearest word on both
+    sides, or the same two words on one side."""
+    (before, after), (their_before, their_after) = _neighbours(item["context"]), _neighbours(resolved["context"])
+
+    def same(mine: list, theirs: list, count: int, last: bool) -> bool:
+        mine, theirs = (mine[-count:], theirs[-count:]) if last else (mine[:count], theirs[:count])
+        return len(mine) == count and mine == theirs and None not in mine
+    return (same(before, their_before, 1, True) and same(after, their_after, 1, False)) \
+        or same(before, their_before, 2, True) or same(after, their_after, 2, False)
+
+
+def _suggest(items: list[dict]) -> None:
+    """Propagation: offer the text of a manually resolved marker for every open marker that matches it by
+    partial reading or by context; the latest resolving correction wins, a reading match before a context one."""
+    resolved = sorted((item for item in items if item["correction"] and item["correction"]["text"]),
+                      key=lambda item: item["correction"]["updated"], reverse=True)
+    for item in items:
+        if item["correction"] is not None:
+            continue
+        for match, test in (("reading", lambda other: _reading_matches(item, other, other["correction"]["text"])),
+                            ("context", lambda other: _context_matches(item, other))):
+            source = next((other for other in resolved if test(other)), None)
+            if source:
+                item["suggestion"] = {"text": source["correction"]["text"], "correction": source["correction"]["id"],
+                                      "match": match}
+                break
 
 
 def page_view(ctx, index: int, corrections: list[dict]) -> dict:
@@ -152,7 +236,7 @@ def page_view(ctx, index: int, corrections: list[dict]) -> dict:
                       for word in page.words.get(word_id, [])]
         return shown
 
-    return {"index": index, "articles": [
+    return {"index": index, "notes": layer.notes(corrections, index), "articles": [
         {"id": article["id"], "kind": article["kind"], "blocks": [
             {"id": block["id"], "kind": block["kind"], "lines": [shown for line in block["lines"]
                                                                  if (shown := words(line))]}
@@ -170,6 +254,34 @@ def correction(ctx, index: int, word_id: str, text: str, corrections: list[dict]
     ids = page.group(page.target(word_id))
     return {"kind": layer.TEXT, "page": index, "ids": ids, "text": " ".join(text.split()),
             "previous": page.text(ids, page.automatic)}
+
+
+def note(ctx, index: int, bbox, text) -> dict:
+    """What a region note would store (see ocrmaker.corrections): its page, region and text."""
+    if not 0 <= index < page_count(ctx):
+        raise KeyError("Stránka neexistuje.")
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("Poznámka potřebuje text.")
+    geometry = read_pages(ctx.result(PREPARED_STEP))[index]
+    if not (isinstance(bbox, list) and len(bbox) == 4
+            and all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in bbox)):
+        raise ValueError("Oblast poznámky musí být obdélník [x0, y0, x1, y1].")
+    x0, y0, x1, y1 = (round(float(value), 2) for value in bbox)
+    if not (0 <= x0 < x1 <= geometry["width"] and 0 <= y0 < y1 <= geometry["height"]):
+        raise ValueError("Oblast poznámky musí ležet na stránce.")
+    return {"kind": layer.NOTE, "page": index, "bbox": [x0, y0, x1, y1], "text": " ".join(text.split())}
+
+
+def article_order(ctx, index: int, article_ids) -> dict:
+    """What a manual article order of a page would store (see ocrmaker.corrections): the new order and the
+    automatic one. It must name every article of the page once."""
+    if not 0 <= index < page_count(ctx):
+        raise KeyError("Stránka neexistuje.")
+    automatic = [article["id"] for article in Page(ctx, index, []).articles]
+    if not (isinstance(article_ids, list) and all(isinstance(item, str) for item in article_ids)
+            and len(article_ids) == len(automatic) and set(article_ids) == set(automatic)):
+        raise ValueError("Nové pořadí musí obsahovat každý článek stránky právě jednou.")
+    return {"kind": layer.ORDER, "page": index, "articles": list(article_ids), "previous": automatic}
 
 
 def crop(ctx, index: int, word_id: str) -> bytes:

@@ -29,19 +29,21 @@ class PrintedOcr(Step):
     readings: printed word index -> (text, confidence), a damaged reading in the word's own box ("" makes an
     empty word box). split: printed word index -> the share of its width where Tesseract would have cut it
     in two: two low-confidence fragments that leave its middle and its ends uncovered. joined: printed word indices read together
-    with the next word as one low-confidence box.
+    with the next word as one low-confidence box. printed: the ground truth of another printed text
+    (`printed_words(text)`), PRINTED by default.
     """
 
     id = "ocr"
 
-    def __init__(self, readings=None, split=None, joined=()):
+    def __init__(self, readings=None, split=None, joined=(), printed=None):
+        self.printed = printed or PRINTED
         self.readings = readings or {}
         self.split = split or {}
         self.joined = set(joined)
 
     def run(self, ctx):
         lines: dict[float, list] = {}
-        for index, (text, box) in enumerate(PRINTED):
+        for index, (text, box) in enumerate(self.printed):
             lines.setdefault(round(box[1], 1), []).append((index, text, list(box)))
         stored, count = [], 0
 

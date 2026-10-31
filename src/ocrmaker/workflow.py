@@ -14,6 +14,7 @@ import traceback
 import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 
 from . import corrections as manual
 from . import existing_text, providers, report, review
@@ -274,9 +275,10 @@ class Workflow:
 
     # Manual review (ocrmaker.review): reading the queue and the text, recording manual corrections ---------
 
-    def review_queue(self, project_id: str) -> dict:
-        """The review queue: every illegible marker in force with its context, hint, candidate and correction."""
-        return review.queue(self._review(project_id), self.store.corrections(project_id))
+    def review_queue(self, project_id: str, *, reconstructions: bool = False) -> dict:
+        """The review queue: every illegible marker in force with its context, hint, candidate, correction and
+        propagation suggestion; with reconstructions, the accepted reconstructions follow for a spot check."""
+        return review.queue(self._review(project_id), self.store.corrections(project_id), reconstructions)
 
     def review_page(self, project_id: str, page: int) -> dict:
         """A page's text as Export would write it now, word by word with each word's origin."""
@@ -298,7 +300,7 @@ class Workflow:
         correction there. It is saved at once and runs no step (ADR 0004); Export applies it. Text equal to
         what the automatic steps wrote removes the correction instead. Returns the stored correction or None.
         """
-        if source not in ("queue", "word"):
+        if source not in manual.SOURCES:
             raise ValueError("Neznámý původ ruční opravy.")
         lock = self._lock(project_id)
         try:
@@ -323,6 +325,73 @@ class Workflow:
                 kept.append(correction)
             self.store.write_corrections(project_id, kept)
             return correction
+        finally:
+            lock.release()
+
+    def suggestions(self, project_id: str, correction_id: str | None = None) -> list[dict]:
+        """The open markers of the review queue that carry a propagation suggestion (ocrmaker.review), in
+        queue order; only those offering the text of one correction when its id is given."""
+        return [item for item in self.review_queue(project_id)["items"] if item["suggestion"]
+                and correction_id in (None, item["suggestion"]["correction"])]
+
+    def accept_suggestion(self, project_id: str, page: int, word_id: str) -> dict | None:
+        """Accept a queue item's propagation suggestion in one action: its text becomes the item's manual
+        correction (source "suggestion"). KeyError when the item has no suggestion."""
+        item = next((item for item in self.suggestions(project_id)
+                     if item["page"] == page and word_id in item["ids"]), None)
+        if item is None:
+            raise KeyError("Pro toto místo není žádný návrh.")
+        return self.correct(project_id, page, item["id"], item["suggestion"]["text"], source="suggestion")
+
+    def add_note(self, project_id: str, page: int, bbox: list[float], text: str) -> dict:
+        """Attach a note to a region of a page (source page coordinates); saved at once, it runs no step."""
+        def change(stored: list[dict]) -> dict:
+            stamp = now()
+            made = {"id": uuid.uuid4().hex[:12], **review.note(self._review(project_id), page, bbox, text),
+                    "created": stamp, "updated": stamp}
+            stored.append(made)
+            return made
+        return self._change_corrections(project_id, change)
+
+    def edit_note(self, project_id: str, note_id: str, text: str) -> dict:
+        """Change a region note's text; KeyError for an unknown note."""
+        def change(stored: list[dict]) -> dict:
+            position = next((n for n, item in enumerate(stored)
+                             if item.get("id") == note_id and item.get("kind") == manual.NOTE), None)
+            if position is None:
+                raise KeyError("Poznámka neexistuje.")
+            old = stored[position]
+            made = review.note(self._review(project_id), old["page"], old["bbox"], text)
+            stored[position] = {**old, "text": made["text"], "updated": now()}
+            return stored[position]
+        return self._change_corrections(project_id, change)
+
+    def reorder_articles(self, project_id: str, page: int, article_ids: list[str]) -> dict | None:
+        """Put a page's articles in a new order (every article id of the page once), applied at Export to both
+        outputs. It replaces the page's earlier manual order; the automatic order removes it. Returns the
+        stored correction or None."""
+        def change(stored: list[dict]) -> dict | None:
+            made = review.article_order(self._review(project_id), page, article_ids)
+            position = next((n for n, item in enumerate(stored)
+                             if item.get("kind") == manual.ORDER and item["page"] == page), None)
+            earlier = stored.pop(position) if position is not None else None
+            if made["articles"] == made["previous"]:
+                return None
+            stamp = now()
+            correction = {"id": earlier["id"] if earlier else uuid.uuid4().hex[:12], **made,
+                          "created": earlier["created"] if earlier else stamp, "updated": stamp}
+            stored.insert(len(stored) if position is None else position, correction)
+            return correction
+        return self._change_corrections(project_id, change)
+
+    def _change_corrections(self, project_id: str, change: Callable[[list[dict]], Any]) -> Any:
+        """Change the stored manual corrections in place under the run lock (refused during a run)."""
+        lock = self._lock(project_id)
+        try:
+            stored = self.store.corrections(project_id)
+            outcome = change(stored)
+            self.store.write_corrections(project_id, stored)
+            return outcome
         finally:
             lock.release()
 

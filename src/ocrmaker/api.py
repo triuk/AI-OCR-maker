@@ -150,9 +150,10 @@ def create_api(workflow: Workflow, *, token: str | None = None, control=None) ->
         return FileResponse(workflow.page_image(project_id, page), media_type="image/png")
 
     @app.get("/api/projects/{project_id}/review/queue")
-    def review_queue(project_id: str):
-        """Manual review's queue of illegible markers (ocrmaker.review); 422 until automation has finished."""
-        return workflow.review_queue(project_id)
+    def review_queue(project_id: str, reconstructions: bool = False):
+        """Manual review's queue of illegible markers (ocrmaker.review), with ?reconstructions=true followed by
+        the accepted reconstructions; 422 until automation has finished."""
+        return workflow.review_queue(project_id, reconstructions=reconstructions)
 
     @app.get("/api/projects/{project_id}/review/pages/{page}")
     def review_page(project_id: str, page: int):
@@ -173,8 +174,40 @@ def create_api(workflow: Workflow, *, token: str | None = None, control=None) ->
         if not isinstance(body.get("page"), int) or not isinstance(body.get("word"), str) \
                 or not isinstance(body.get("text"), str):
             raise ValueError("Oprava potřebuje stránku, slovo a text.")
-        return {"correction": workflow.correct(project_id, body["page"], body["word"], body["text"],
-                                               source=body.get("source") or "word")}
+        correction = workflow.correct(project_id, body["page"], body["word"], body["text"],
+                                      source=body.get("source") or "word")
+        # The open markers that now offer the same text (propagation), for a one-click acceptance.
+        suggestions = workflow.suggestions(project_id, correction["id"]) if correction else []
+        return {"correction": correction, "suggestions": suggestions}
+
+    @app.get("/api/projects/{project_id}/review/suggestions")
+    def suggestions(project_id: str):
+        """The open markers carrying a propagation suggestion, in queue order."""
+        return {"suggestions": workflow.suggestions(project_id)}
+
+    @app.post("/api/projects/{project_id}/review/suggestions")
+    def accept_suggestion(project_id: str, body: dict):
+        """Accept a queue item's suggestion: {"page", "word" (the item's id)}; 404 when it has none."""
+        if not isinstance(body.get("page"), int) or not isinstance(body.get("word"), str):
+            raise ValueError("Přijetí návrhu potřebuje stránku a slovo.")
+        return {"correction": workflow.accept_suggestion(project_id, body["page"], body["word"])}
+
+    @app.put("/api/projects/{project_id}/review/pages/{page}/order")
+    def reorder_articles(project_id: str, page: int, body: dict):
+        """Save a page's manual article order: {"articles": [every article id of the page, in the new order]}."""
+        return {"correction": workflow.reorder_articles(project_id, page, body.get("articles"))}
+
+    @app.post("/api/projects/{project_id}/review/notes")
+    def add_note(project_id: str, body: dict):
+        """Attach a region note: {"page", "bbox" [x0, y0, x1, y1] in source page coordinates, "text"}."""
+        if not isinstance(body.get("page"), int):
+            raise ValueError("Poznámka potřebuje stránku.")
+        return {"note": workflow.add_note(project_id, body["page"], body.get("bbox"), body.get("text"))}
+
+    @app.put("/api/projects/{project_id}/review/notes/{note_id}")
+    def edit_note(project_id: str, note_id: str, body: dict):
+        """Change a region note's text: {"text"}. A note is removed like any correction (DELETE corrections)."""
+        return {"note": workflow.edit_note(project_id, note_id, body.get("text"))}
 
     @app.delete("/api/projects/{project_id}/corrections/{correction_id}")
     def revert_correction(project_id: str, correction_id: str):

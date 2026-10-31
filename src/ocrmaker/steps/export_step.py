@@ -18,6 +18,8 @@ the front matter.
 Word text: both outputs take every word from `ExportStep.exported_words`, the one place where Export decides
 what a word says. Reconstruction records (AI reconstruction, Web lookup; `ocrmaker.transcription`) and manual
 corrections (`ocrmaker.corrections`, ADR 0004; handed over in manual review's result) are applied there.
+Article order: both outputs take a page's articles from `reading_articles`, which applies a manual article
+order.
 """
 from __future__ import annotations
 
@@ -65,13 +67,18 @@ def reading_order(ctx) -> tuple[dict[int, dict], list[dict]]:
     return {item["index"]: item for item in order.get("pages", [])}, order.get("links", [])
 
 
-def reading_articles(ctx, recognised: dict, order_pages: dict[int, dict]) -> list[dict]:
+def reading_articles(ctx, recognised: dict, order_pages: dict[int, dict], manual: list[dict] = ()) -> list[dict]:
     """A page's articles in reading order, as OCR word ids: [{"id", "kind", "continues", "blocks": [{"id",
     "kind", "lines": [[word id, ...], ...]}]}].
 
     Without a reading order the page is one article of one block holding Tesseract's lines. Words no block
-    holds (there should be none) are not lost: they end the page as one more article of one line.
+    holds (there should be none) are not lost: they end the page as one more article of one line. A manual
+    article order among the manual corrections given (`corrections.ordered`) puts the articles in its order.
     """
+    return corrections.ordered(_automatic_articles(ctx, recognised, order_pages), manual, recognised["index"])
+
+
+def _automatic_articles(ctx, recognised: dict, order_pages: dict[int, dict]) -> list[dict]:
     index = recognised["index"]
     if index not in order_pages:
         return [{"id": f"p{index + 1}-text", "kind": "article", "continues": None, "blocks": [
@@ -113,7 +120,7 @@ class ExportStep(Step):
         for page in pages:
             recognised = read_page(ocr, page["index"]) or {"index": page["index"], "lines": []}
             words = self.exported_words(ctx, recognised)
-            lines = [expand(words, line) for article in reading_articles(ctx, recognised, order_pages)
+            lines = [expand(words, line) for article in reading_articles(ctx, recognised, order_pages, manual_corrections(ctx))
                      for block in article["blocks"] for line in block["lines"]]
             if page["index"] in order_pages:
                 lines = [line for line in lines if line]
@@ -134,7 +141,7 @@ class ExportStep(Step):
             words = self.exported_words(ctx, recognised)
             articles = [{**article, "blocks": [{**block, "lines": [expand(words, line) for line in block["lines"]]}
                                                for block in article["blocks"]]}
-                        for article in reading_articles(ctx, recognised, order_pages)]
+                        for article in reading_articles(ctx, recognised, order_pages, manual_corrections(ctx))]
             # The words no block holds may all write nothing; then there is no article for them.
             articles = [article for article in articles if article["id"] != f"p{index + 1}-rest"
                         or any(line for block in article["blocks"] for line in block["lines"])]
