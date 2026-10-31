@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import settings as project_settings
 from .errors import ConfirmationRequired, Conflict
+from .reconstruction import MARKER
 from .steps import STEPS
 from .workflow import Workflow
 
@@ -65,7 +66,8 @@ def create_api(workflow: Workflow, *, token: str | None = None, control=None) ->
     @app.get("/bootstrap.json")
     def bootstrap():
         # Not token-protected: the page reads its token here, so the browser URL never carries it.
-        return {"token": app.state.token}
+        # The illegible marker comes from here too, so the UI never spells it itself.
+        return {"token": app.state.token, "marker": MARKER}
 
     @app.get("/api/projects")
     def projects():

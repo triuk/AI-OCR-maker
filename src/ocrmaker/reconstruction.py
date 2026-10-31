@@ -70,9 +70,10 @@ import pymupdf
 from . import inkgaps
 from .pages import apply_rect, union
 from .problems import UNREADABLE
-from .transcription import MARKER
 
 RECONSTRUCT_STEP = "reconstruct"
+# The illegible marker: the whole text of an unreadable word no automatic attempt resolved (GLOSSARY).
+MARKER = "[NEČITELNÉ]"
 RECONSTRUCT_FILE = "reconstruct.json"
 PURPOSE = "reconstruction"
 ACCEPTED, PUBLISHER_ERROR, UNRESOLVED = "accepted", "publisher_error", "unresolved"

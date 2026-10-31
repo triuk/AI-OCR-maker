@@ -30,7 +30,6 @@ from .store import ProjectStore, now
 
 PENDING, RUNNING, DONE, WARNING, FAILED = "pending", "running", "done", "warning", "failed"
 FINISHED = (DONE, WARNING)
-REVIEW_STEP = "review"
 REMOVE_ACTION = existing_text.REMOVE_ACTION
 # Progress is written to the project document at most this often (seconds).
 PROGRESS_INTERVAL = 0.25
@@ -621,7 +620,7 @@ class Workflow:
     def _review(self, project_id: str) -> _Results:
         """The results manual review reads, once every automatic step before it has finished."""
         document = self.store.get(project_id)
-        if REVIEW_STEP not in self.steps:
+        if manual.REVIEW_STEP not in self.steps:
             raise ValueError("Ruční kontrola zatím není k dispozici.")
         unfinished = [d.label for d in STEPS[:FIRST_MANUAL]
                       if d.id in self.steps and document["steps"][d.id]["state"] not in FINISHED]

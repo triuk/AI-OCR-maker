@@ -400,7 +400,10 @@ function wireControls() {
 async function bootstrap() {
   wireControls();
   try {
-    token = (await (await fetch("/bootstrap.json")).json()).token;
+    const boot = await (await fetch("/bootstrap.json")).json();
+    token = boot.token;
+    window.ocrmaker.marker = boot.marker;  // the illegible marker, as the backend writes it
+    document.querySelectorAll("[data-marker]").forEach(node => node.textContent = boot.marker);
   } catch {
     $("connection").textContent = "Aplikace neodpovídá"; $("connection").className = "connection offline";
     return;

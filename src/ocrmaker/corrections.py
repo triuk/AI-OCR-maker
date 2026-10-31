@@ -51,7 +51,8 @@ from .store import now
 
 TEXT, NOTE, ORDER = "text", "note", "order"
 SOURCES = ("queue", "word", "suggestion")
-# The Review step's result keeps the corrections it handed to Export under this name.
+# The manual Review step, and the name under which its result keeps the corrections it handed to Export.
+REVIEW_STEP = "review"
 CORRECTIONS_FILE = "corrections.json"
 
 

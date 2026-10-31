@@ -1,6 +1,6 @@
 "use strict";
 // Manual review: the scan with a switchable overlay (layout, reading order, confidence) on one side; the
-// queue of illegible markers and the page's text on the other. Any word can be clicked, on the scan or in
+// queue of illegible markers (then the doubtful readings kept as read) and the page's text on the other. Any word can be clicked, on the scan or in
 // the text, and corrected. A manual correction is saved at once and applied at export; it never runs a step
 // (ADR 0004). The queue: type the text and press Ctrl+Enter to save it and move on to the next marker; it
 // can optionally continue through the accepted reconstructions for a spot check. A resolved marker's text is
@@ -12,7 +12,8 @@
   // Which step's overlay each mode draws.
   const MODE_STEPS = {layout: "layout", order: "order", confidence: "ocr"};
   const ORIGINS = {ocr: "lokální OCR", ai: "AI rekonstrukce", publisher: "chyba v tisku (ponecháno)",
-                   web: "dohledáno na webu", marker: "[NEČITELNÉ]", manual: "ruční oprava"};
+                   web: "dohledáno na webu", get marker() { return window.ocrmaker.marker; },
+                   doubtful: "pochybné čtení (ponecháno)", manual: "ruční oprava"};
   const BANDS = [[90, "ocr-high"], [75, "ocr-good"], [50, "ocr-low"], [0, "ocr-poor"]];
   const LEGENDS = {
     layout: [{label: "text", cls: "layout-body"}, {label: "nadpis", cls: "layout-heading"},
@@ -22,7 +23,8 @@
     confidence: [{label: "důvěra 90–100 %", cls: "ocr-high"}, {label: "75–90 %", cls: "ocr-good"},
                  {label: "50–75 %", cls: "ocr-low"}, {label: "pod 50 %", cls: "ocr-poor"}],
   };
-  const WORD_LEGEND = [{label: "[NEČITELNÉ]", cls: "review-marker"}, {label: "ruční oprava", cls: "review-manual"},
+  const WORD_LEGEND = [{get label() { return window.ocrmaker.marker; }, cls: "review-marker"},
+                       {label: "pochybné čtení", cls: "review-doubtful"}, {label: "ruční oprava", cls: "review-manual"},
                        {label: "poznámka", cls: "review-note"}];
   const MATCHES = {reading: "podobné částečné čtení", context: "stejný kontext"};
   const KINDS = {article: "článek", ad: "inzerát", header: "záhlaví", footer: "zápatí", caption: "popisek"};
@@ -129,7 +131,7 @@
     function draw(layer, overlay, page) {
       drawMode(layer, overlay.mode, overlay.view);
       for (const word of pageWords(overlay.view)) {
-        const cls = ["review-word", word.origin === "marker" ? "review-marker" : "", word.origin === "manual" ? "review-manual" : "",
+        const cls = ["review-word", word.origin === "marker" ? "review-marker" : "", word.origin === "doubtful" ? "review-doubtful" : "", word.origin === "manual" ? "review-manual" : "",
                      state.selected && state.selected.page === page.index && state.selected.target === word.target ? "review-selected" : ""];
         box(word.bbox, {class: cls.join(" "), "data-select": word.target,
                         "data-tip": `${quoted(word.text)}\n${ORIGINS[word.origin] || word.origin} · důvěra ${percent(word.confidence)}\nKlepnutím opravíte`}, layer);
@@ -166,9 +168,10 @@
 
     // Side panel -----------------------------------------------------------------------------------
     function renderSummary() {
-      const {markers = 0, remaining = 0} = state.queue.counts;
+      const {markers = 0, remaining = 0, doubtful = 0} = state.queue.counts;
       const count = state.corrections.length;
-      $(".review-summary").innerHTML = `<strong>${markers ? `Neopravené značky [NEČITELNÉ]: ${remaining} / ${markers}` : "Žádná značka [NEČITELNÉ]"}</strong> · ${count} ${plural(count, "ruční oprava", "ruční opravy", "ručních oprav")}
+      const marker = esc(window.ocrmaker.marker);
+      $(".review-summary").innerHTML = `<strong>${markers ? `Neopravené značky ${marker}: ${remaining} / ${markers}` : `Žádná značka ${marker}`}</strong>${doubtful ? ` · ${doubtful} ${plural(doubtful, "pochybné čtení", "pochybná čtení", "pochybných čtení")} ponecháno ke kontrole` : ""} · ${count} ${plural(count, "ruční oprava", "ruční opravy", "ručních oprav")}
         <div class="hint">Opravy se ukládají hned a použijí se při exportu; žádný krok se kvůli nim znovu nespouští. Export je možný i se zbývajícími značkami.</div>`;
       $('[data-tab="queue"]').textContent = markers ? `Fronta (${remaining})` : "Fronta";
     }
@@ -200,18 +203,20 @@
       const item = current();
       const correction = item.correction;
       const checking = item.kind === "reconstruction";
-      const value = correction ? correction.text : checking ? item.text : item.candidate || item.hint;
-      const markers = items.filter(entry => entry.kind !== "reconstruction").length;
+      const kept = item.kind === "doubtful";  // a doubtful reading kept as read: its text is what is written
+      const value = correction ? correction.text : checking || kept ? item.text : item.candidate || item.hint;
+      const markers = items.filter(entry => entry.kind === "marker").length;
+      const doubtful = items.filter(entry => entry.kind === "doubtful").length;
       const suggestion = item.suggestion;
       panel.innerHTML = `${filter}<div class="queue-nav">${items.map((entry, index) =>
-          `<button type="button" class="queue-chip ${entry.kind === "reconstruction" ? "reconstruction" : ""} ${entry.correction ? "corrected" : ""} ${entry.suggestion ? "suggested" : ""} ${index === state.position ? "selected" : ""}"
+          `<button type="button" class="queue-chip ${entry.kind === "marker" ? "" : esc(entry.kind)} ${entry.correction ? "corrected" : ""} ${entry.suggestion ? "suggested" : ""} ${index === state.position ? "selected" : ""}"
              data-item="${index}" title="Strana ${entry.page + 1}: ${esc(entry.correction || entry.kind === "reconstruction" ? entry.text : quoted(entry.hint))}${entry.suggestion ? ` · návrh ${esc(quoted(entry.suggestion.text))}` : ""}">${index + 1}</button>`).join("")}</div>
         <div class="queue-item">
-          <div class="facts">${checking ? `Přijatá rekonstrukce ${state.position - markers + 1} z ${items.length - markers}` : `Značka ${state.position + 1} z ${markers}`} · strana ${item.page + 1}${correction ? " · opraveno" : ""}</div>
+          <div class="facts">${checking ? `Přijatá rekonstrukce ${state.position - markers - doubtful + 1} z ${items.length - markers - doubtful}` : item.kind === "doubtful" ? `Pochybné čtení ${state.position - markers + 1} z ${doubtful} (ponecháno, jak bylo přečteno)` : `Značka ${state.position + 1} z ${markers}`} · strana ${item.page + 1}${correction ? " · opraveno" : ""}</div>
           <img class="queue-crop" alt="Výřez skenu s vyznačeným místem" src="${esc(apiUrl(`${base}/review/pages/${item.page}/crop/${encodeURIComponent(item.id)}`))}">
           <p class="queue-context">${item.context.before ? `…${esc(item.context.before)} ` : ""}<mark>${esc(item.text || "∅")}</mark>${item.context.after ? ` ${esc(item.context.after)}…` : ""}</p>
           <dl class="queue-facts">
-            <dt>${checking ? "Čtení lokálního OCR" : "Částečné čtení"}</dt><dd>${esc(quoted(item.hint))}</dd>
+            <dt>${checking || kept ? "Čtení lokálního OCR" : "Částečné čtení"}</dt><dd>${esc(quoted(item.hint))}</dd>
             ${checking ? `<dt>Zapsáno</dt><dd>${esc(quoted(item.text))} · ${esc(ORIGINS[item.source === "web" ? "web" : item.status === "publisher_error" ? "publisher" : "ai"])} · důvěra ${percent(item.confidence)}</dd>`
               : `<dt>Návrh AI</dt><dd>${item.candidate ? `${esc(quoted(item.candidate))} · důvěra ${percent(item.confidence)}
               <button type="button" class="link" data-use="candidate">Použít</button>` : "bez návrhu"}</dd>`}

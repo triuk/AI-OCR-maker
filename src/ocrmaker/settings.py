@@ -21,7 +21,7 @@ DEFAULTS = {
     "project_dictionary": [],
     # AI reconstruction: a reading at least this confident (0-100) is accepted, a less confident one is not.
     "reconstruction_accept_confidence": 80.0,
-    # Web lookup: short web searches settle the spots AI reconstruction left unresolved (off: they keep the marker).
+    # Web lookup: short web searches settle the spots AI reconstruction left unresolved (off: they stay unresolved).
     "web_lookup": True,
 }
 

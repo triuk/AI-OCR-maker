@@ -1,12 +1,17 @@
 "use strict";
-// Web lookup step preview: the words a web source settled and the illegible markers left, with the queries,
-// the answer and the source URLs on hover, plus a list of the page's web-settled words with clickable sources.
+// Web lookup step preview: the words a web source settled and the spots left unresolved (illegible markers,
+// doubtful readings kept as read), with the queries, the answer and the source URLs on hover, plus a list of
+// the page's web-settled words with clickable sources.
 (function () {
   const {pageViewer, box, esc} = window.ocrmaker;
   const STATUSES = {
     web: {cls: "lookup-web", label: "dohledáno na webu"},
-    unresolved: {cls: "rec-unresolved", label: "[NEČITELNÉ]"},
+    marker: {cls: "rec-unresolved", get label() { return window.ocrmaker.marker; }},
+    doubtful: {cls: "rec-doubtful", label: "pochybné čtení (ponecháno)"},
   };
+  // An unresolved word shows the illegible marker, or a doubtful reading kept as read.
+  const statusOf = word => word.status !== "unresolved" ? word.status
+    : word.text === window.ocrmaker.marker ? "marker" : "doubtful";
   const OUTCOMES = {
     settled: "dohledáno",
     insufficient: "web nedal dost jistý doklad",
@@ -22,12 +27,13 @@
 
   function describe(overlay, page) {
     if (!overlay) return `Strana ${page.index + 1}: bez výsledku dohledání`;
-    const {spots, searched, settled, markers} = overlay.counts;
+    const {spots, searched, settled, markers, kept = 0} = overlay.counts;
+    const left = `${markers} značek ${window.ocrmaker.marker}` + (kept ? `, ${kept} pochybných čtení` : "");
     if (!overlay.enabled) return `Strana ${page.index + 1}: dohledání na webu je v nastavení vypnuto`
-      + (spots ? `, ${markers} značek [NEČITELNÉ] zůstává` : "");
+      + (spots ? `, zůstává ${left}` : "");
     if (!spots) return `Strana ${page.index + 1}: žádné nevyřešené místo`;
     return `Strana ${page.index + 1}: ${spots} nevyřešených míst, ${searched} hledáno, ${settled} dohledáno, `
-      + `${markers} značek [NEČITELNÉ]` + (overlay.rejected ? " · odpověď AI odmítnuta" : "");
+      + `zůstává ${left}` + (overlay.rejected ? " · odpověď AI odmítnuta" : "");
   }
 
   function list(host, overlay) {
@@ -42,7 +48,7 @@
 
   function draw(layer, overlay, host) {
     for (const word of overlay.words) {
-      const status = STATUSES[word.status];
+      const status = STATUSES[statusOf(word)];
       const lines = [`${status.label}: ${quoted(word.text)}`, `Místní čtení: ${quoted(word.hint)}`];
       if (word.status === "web") lines.push(`Důvěra: ${percent(word.confidence)}`);
       else {

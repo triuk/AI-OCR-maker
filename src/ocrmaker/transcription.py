@@ -22,12 +22,14 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from .lookup import LOOKUP_STEP
+from .reconstruction import MARKER, RECONSTRUCT_STEP
 from .words import page_file, page_words as ocr_words
 
-# The illegible marker: the whole text of an unreadable word no automatic attempt resolved.
-MARKER = "[NEČITELNÉ]"
+__all__ = ["MARKER", "RECORD_STEPS", "expand", "page_words", "records"]
+
 # Steps whose result holds reconstruction records per page (`pages/page-NNNN.json`), applied in this order.
-RECORD_STEPS = ("reconstruct", "lookup")
+RECORD_STEPS = (RECONSTRUCT_STEP, LOOKUP_STEP)
 
 
 def records(ctx, index: int) -> list[dict]:

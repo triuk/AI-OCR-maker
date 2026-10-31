@@ -93,12 +93,12 @@
       <fieldset class="ai-settings">
         <legend>AI rekonstrukce</legend>
         <label>Přijmout rekonstrukci od důvěry AI (%)<input id="settingsReconstruction" type="number" min="0" max="100" step="1"></label>
-        <p class="hint">Méně jistá rekonstrukce dostane značku [NEČITELNÉ] a návrh AI zůstane jako nápověda pro ruční kontrolu.</p>
+        <p class="hint">Při nižší jistotě zůstane místo nevyřešené: nečitelné slovo dostane značku <span data-marker></span>, pochybné čtení zůstane, jak ho přečetlo OCR. Návrh AI zůstane jako nápověda pro ruční kontrolu.</p>
       </fieldset>
       <fieldset class="ai-settings">
         <legend>Dohledání na webu</legend>
         <label class="check"><input id="settingsWebLookup" type="checkbox"> Dohledávat nevyřešená místa na webu</label>
-        <p class="hint">Krátké cílené dotazy (jména, místa, názvy, čísla) přes webové vyhledávání zvoleného poskytovatele AI. Vypnuté: nevyřešená místa rovnou dostanou značku [NEČITELNÉ].</p>
+        <p class="hint">Krátké cílené dotazy (jména, místa, názvy, čísla) přes webové vyhledávání zvoleného poskytovatele AI. Vypnuté: nevyřešená místa zůstanou, jak jsou (značka <span data-marker></span>, nebo pochybné čtení z OCR).</p>
       </fieldset>
       <div class="dialog-actions">
         <button id="deleteProject" type="button" class="danger push-left">Smazat projekt</button>

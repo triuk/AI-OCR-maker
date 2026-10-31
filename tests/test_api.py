@@ -400,3 +400,9 @@ def test_stopping_a_rerun_keeps_earlier_results_and_returns_the_interrupted_step
     assert stopped["running"] is False
     assert [s["state"] for s in stopped["steps"][:4]] == ["done", "pending", "pending", "pending"]
     assert client.post(f"/api/projects/{pid}/stop").json() == {"stopping": False}
+
+
+def test_the_page_takes_the_illegible_marker_from_bootstrap_and_never_spells_it(client):
+    assert client.get("/bootstrap.json").json()["marker"] == "[NEČITELNÉ]"
+    for script in ("/", "/app.js", "/previews/reconstruct.js", "/previews/lookup.js", "/previews/review.js"):
+        assert "NEČITELNÉ" not in client.get(script).text, script

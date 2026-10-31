@@ -240,6 +240,8 @@ dialog::backdrop { background: #12232f55; backdrop-filter: blur(3px); }
 .legend-item i.rec-accepted { border-color: #2f9e44; background: #2f9e4433; }
 .legend-item i.rec-publisher { border-color: #e8590c; background: #e8590c33; border-style: dashed; }
 .legend-item i.rec-unresolved { border-color: #c92a2a; background: #c92a2a40; }
+.rec-doubtful { fill: #f59f0033; stroke: #e67700; stroke-dasharray: 3 2; }
+.legend-item i.rec-doubtful { border-color: #e67700; background: #f59f0033; border-style: dashed; }
 /* Web lookup preview */
 .lookup-web { fill: #1c7ed633; stroke: #1c7ed6; }
 .legend-item i.lookup-web { border-color: #1c7ed6; background: #1c7ed633; }
@@ -297,6 +299,9 @@ button.link { border: none; background: none; color: var(--accent); padding: 0 4
 .review-selected { stroke: #087f8c; stroke-width: 3; fill: #087f8c22; }
 .review-current { fill: none; stroke: #f59f00; stroke-width: 4; pointer-events: none; }
 .legend-item i.review-marker { border-color: #c92a2a; background: #c92a2a33; }
+.review-doubtful { fill: #f59f0022; stroke: #e67700; stroke-width: 1.8; stroke-dasharray: 3 2; }
+.legend-item i.review-doubtful { border-color: #e67700; background: #f59f0022; border-style: dashed; }
+.queue-chip.doubtful { border-color: #e6770066; }
 .legend-item i.review-manual { border-color: #7048e8; background: #7048e826; }
 /* Manual review extras: region notes, suggestions, the reconstruction filter, the article order list. */
 .review-note { fill: #f59f0012; stroke: #e67700; stroke-width: 2.5; stroke-dasharray: 8 5; pointer-events: stroke; cursor: pointer; }

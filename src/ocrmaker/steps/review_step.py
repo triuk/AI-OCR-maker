@@ -25,7 +25,7 @@ REPORTED = 50
 
 
 class ReviewStep(Step):
-    id = "review"
+    id = layer.REVIEW_STEP
 
     def run(self, ctx: StepContext) -> None:
         corrections = ctx.corrections()

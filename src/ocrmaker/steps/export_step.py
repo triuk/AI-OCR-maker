@@ -48,14 +48,13 @@ def output_names(source_name: str) -> dict[str, str]:
     return {"pdf": f"{stem}-ocr.pdf", "markdown": f"{stem}-ocr.md"}
 
 
-REVIEW_STEP = "review"
 
 
 def manual_corrections(ctx) -> list[dict]:
     """The manual corrections manual review handed to this export (its result), or none without one."""
-    if not ctx.has_result(REVIEW_STEP):
+    if not ctx.has_result(corrections.REVIEW_STEP):
         return []
-    result = ctx.result(REVIEW_STEP)
+    result = ctx.result(corrections.REVIEW_STEP)
     return result.read_json(corrections.CORRECTIONS_FILE) if result.exists(corrections.CORRECTIONS_FILE) else []
 
 
