@@ -220,7 +220,8 @@ class Workflow:
         step = self.steps.get(step_id)
         if result is None or step is None:
             return None
-        return step.overlay(result, page)
+        later = {other: self.result(project_id, other) for other in step.preview_reads}
+        return step.preview(result, page, later)
 
     def pages(self, project_id: str) -> list[dict]:
         """The page geometry of every page (see ocrmaker.pages), or [] until Import has finished."""

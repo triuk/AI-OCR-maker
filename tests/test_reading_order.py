@@ -269,6 +269,17 @@ def test_layout_recognises_headers_footers_headings_captions_and_tables(rules_ru
     assert table["text"].split() == [word for row in TABLE_ROWS for word in row]
 
 
+def test_the_layout_preview_shows_the_blocks_reading_order_put_into_an_ad_as_ads(rules_run, client):
+    workflow, _, project = rules_run
+
+    blocks = {block["text"].split()[0]: block for block in workflow.overlay(project["id"], "layout", 0)["blocks"]}
+    assert blocks["Prodám"]["kind"] == "ad" and blocks["Sbor"]["kind"] == "body"
+    stored = workflow.result(project["id"], "layout").read_json("pages/page-0001.json")["blocks"]
+    assert "ad" not in {block["kind"] for block in stored}  # Layout's own kinds stay as Layout decided them
+    script = client.get("/previews/layout.js").text
+    assert 'kind !== "ad"' not in script and '"inzerát"' in script
+
+
 def test_the_next_pages_request_offers_the_previous_pages_articles_for_continuation(rules_run):
     _, provider, _ = rules_run
     first, second = provider.requests_for("reading_order")[-2:]

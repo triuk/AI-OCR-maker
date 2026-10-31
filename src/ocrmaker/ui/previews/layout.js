@@ -45,7 +45,8 @@
     const root = layer.parentNode;
     for (const column of overlay.columns) box(column, {class: "layout-column"}, layer);
     for (const block of overlay.blocks) {
-      const tip = `Blok ${block.number}: ${LABELS[block.kind] || block.kind}\n${block.lines} řádků, ${block.words} slov\n„${block.text}…“\n${block.id}`;
+      const kind = block.layout_kind ? `${LABELS[block.kind]} (podle pořadí čtení; rozvržení: ${LABELS[block.layout_kind] || block.layout_kind})` : LABELS[block.kind] || block.kind;
+      const tip = `Blok ${block.number}: ${kind}\n${block.lines} řádků, ${block.words} slov\n„${block.text}…“\n${block.id}`;
       box(block.bbox, {class: `layout-block layout-${block.kind}`, "data-tip": tip}, layer);
       badge(root, page, block.bbox, block.number, `layout-${block.kind}`, tip);
     }
@@ -53,7 +54,8 @@
 
   window.stepPreviews.layout = (container, project, step) => pageViewer(container, project, step, {
     draw, describe,
-    legend: KINDS.filter(([kind]) => kind !== "ad").map(([kind, label]) => ({label, cls: `layout-${kind}`}))
+    // Ads come from Reading order: they show once it has run.
+    legend: KINDS.map(([kind, label]) => ({label, cls: `layout-${kind}`}))
       .concat([{label: "sloupec", cls: "layout-column"}]),
   });
 })();

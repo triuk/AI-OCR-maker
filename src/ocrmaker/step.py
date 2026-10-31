@@ -122,6 +122,8 @@ class Step:
     """Base class of a step implementation; subclasses set `id` and implement `run`."""
 
     id: str = ""
+    # Later steps whose committed results the step preview also shows (see `preview`).
+    preview_reads: tuple[str, ...] = ()
 
     def run(self, ctx: StepContext) -> None:
         raise NotImplementedError
@@ -129,6 +131,11 @@ class Step:
     def overlay(self, result: StepResult, page: int) -> dict | None:
         """Step preview overlay data of one page. By default it is what the step stored with write_overlay."""
         return result.overlay(page)
+
+    def preview(self, result: StepResult, page: int, later: dict[str, StepResult | None]) -> dict | None:
+        """The overlay as the step preview shows it, given the results of the steps in `preview_reads` (None
+        for a step without a result yet). By default it is `overlay`."""
+        return self.overlay(result, page)
 
     def report(self, result: StepResult) -> ReportSection | None:
         """This step's section of the run report, computed from its committed result; None adds none.

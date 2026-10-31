@@ -1,7 +1,9 @@
 """Layout: builds blocks (paragraphs in columns, headings, captions, running headers and footers, tables) from
 the recognised lines and words, so that every word belongs to exactly one block (ADR 0005).
 
-The result format is described in `ocrmaker.layout`.
+The result format is described in `ocrmaker.layout`. Ads are recognised later, from the page image, by
+Reading order; once it has run, the step preview shows the blocks it put into an "ad" article as ads (kind
+"ad", with Layout's own kind as "layout_kind"). The Layout result itself keeps Layout's kinds.
 """
 from __future__ import annotations
 
@@ -10,7 +12,8 @@ from collections import Counter
 
 from ..layout import LAYOUT_FILE, block_words, build_page, page_file
 from ..pages import PREPARED_STEP, read_pages
-from ..step import Step, StepContext
+from ..reading_order import ORDER_FILE, ORDER_STEP
+from ..step import Step, StepContext, StepResult
 from ..words import OCR_STEP, page_words, read_page
 
 SNIPPET_WORDS = 12
@@ -18,6 +21,19 @@ SNIPPET_WORDS = 12
 
 class LayoutStep(Step):
     id = "layout"
+    preview_reads = (ORDER_STEP,)
+
+    def preview(self, result: StepResult, page: int, later: dict[str, StepResult | None]) -> dict | None:
+        """The stored overlay, with the blocks Reading order put into an ad article shown as ads."""
+        overlay = self.overlay(result, page)
+        order = later.get(ORDER_STEP)
+        if overlay is None or order is None or not order.exists(ORDER_FILE):
+            return overlay
+        entry = next((item for item in order.read_json(ORDER_FILE)["pages"] if item["index"] == page), None)
+        ads = {block for article in (entry or {}).get("articles", []) if article["kind"] == "ad"
+               for block in article["blocks"]}
+        return {**overlay, "blocks": [{**block, "kind": "ad", "layout_kind": block["kind"]}
+                                      if block["id"] in ads else block for block in overlay["blocks"]]}
 
     def run(self, ctx: StepContext) -> None:
         pages = read_pages(ctx.result(PREPARED_STEP))

@@ -38,7 +38,8 @@ from .pages import apply_rect, display_matrix, display_size, invert
 LAYOUT_STEP = "layout"
 LAYOUT_FILE = "layout.json"
 # Block kinds Layout decides from the words. Ads are recognised from the page image by the reading order
-# AI (an article group of kind "ad", see ocrmaker.reading_order); Layout never marks them on its own.
+# AI (an article group of kind "ad", see ocrmaker.reading_order); Layout never marks them on its own, but its
+# step preview shows them once Reading order has run (steps/layout_step.py).
 KINDS = ("body", "heading", "caption", "header", "footer", "table")
 
 # Text size is measured as the x-height: the height of these letters (no ascender, descender or accent).
