@@ -48,6 +48,28 @@ class Recognizer:
         api.SetImageFile(str(raster))
         api.SetSourceResolution(round(dpi))
         api.Recognize()
+        return {"index": index, "lines": self._lines(index, to_source)}
+
+    def recognize_line(self, raster: Path, box: tuple[int, int, int, int], *, index: int, dpi: float,
+                       to_source: Matrix) -> list[dict]:
+        """The words (without ids) Tesseract reads in one region of a working raster (pixels) taken as a
+        single text line: for ink the automatic page segmentation dropped."""
+        api = self._api
+        api.SetImageFile(str(raster))
+        api.SetSourceResolution(round(dpi))
+        pad = max(4, round((box[3] - box[1]) / 2))
+        left, top = max(0, box[0] - pad), max(0, box[1] - pad)
+        api.SetRectangle(left, top, box[2] + pad - left, box[3] + pad - top)
+        api.SetPageSegMode(PSM.SINGLE_LINE)
+        try:
+            api.Recognize()
+            return [word for line in self._lines(index, to_source) for word in line["words"]]
+        finally:
+            api.SetPageSegMode(PSM.AUTO)
+
+    def _lines(self, index: int, to_source: Matrix) -> list[dict]:
+        """The recognised lines of the last Recognize, words numbered on the page."""
+        api = self._api
         lines, line, word = [], None, None
         block = paragraph = -1
         iterator = api.GetIterator()
@@ -85,4 +107,4 @@ class Recognizer:
                     words.append({"id": f"p{number}-w{count}", **word})
             if words:
                 kept.append({"id": f"p{number}-l{len(kept) + 1}", **line, "words": words})
-        return {"index": index, "lines": kept}
+        return kept

@@ -1,5 +1,10 @@
 """Local OCR: Tesseract 5 reads every prepared working raster into lines, words and chars (ADR 0005).
 
+Tesseract's automatic page segmentation can drop an isolated short line, typically a centred page number in
+the footer. So uncovered line-like ink in the page's top and bottom bands (`inkgaps.uncovered_edge_lines`)
+is read again as a single text line, and what Tesseract reads there with at least RECOVERED_CONFIDENCE
+becomes a line of its own. Then the ink gap finder adds empty word boxes for ink inside lines no word covers.
+
 The result format is described in `ocrmaker.words`; all geometry is in source page coordinates.
 """
 from __future__ import annotations
@@ -16,6 +21,33 @@ from ..words import OCR_FILE, page_file, page_words, read_page
 def _page_list(numbers: list[int]) -> str:
     shown = ", ".join(str(number) for number in numbers[:10])
     return shown + (" …" if len(numbers) > 10 else "")
+
+
+# A line read again in an edge band is kept when its words reach this mean confidence and hold a letter or
+# digit; anything less is likely an ornament or a smudge, not text.
+RECOVERED_CONFIDENCE = 50.0
+
+
+def _recover_edge_lines(recognizer, recognised: dict, raster_path, raster: dict) -> dict:
+    """The page file with the lines Tesseract dropped in the edge bands read again (see the module docstring)."""
+    lines = list(recognised["lines"])
+    number = recognised["index"] + 1
+    count = sum(len(line["words"]) for line in lines)
+    for box in inkgaps.uncovered_edge_lines(recognised, raster_path, raster["to_raster"]):
+        words = recognizer.recognize_line(raster_path, box, index=recognised["index"], dpi=sum(raster["dpi"]) / 2,
+                                          to_source=raster["to_source"])
+        if not words or sum(word["confidence"] for word in words) / len(words) < RECOVERED_CONFIDENCE \
+                or not any(char.isalnum() for word in words for char in word["text"]):
+            continue
+        for word in words:
+            count += 1
+            word["id"] = f"p{number}-w{count}"
+        boxes = [word["bbox"] for word in words]
+        lines.append({"id": f"p{number}-l{len(lines) + 1}",
+                      "bbox": [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes),
+                               max(b[3] for b in boxes)],
+                      "baseline": None, "block": -1, "paragraph": -1, "words": words})
+    return {**recognised, "lines": lines}
 
 
 class OcrStep(Step):
@@ -39,6 +71,7 @@ class OcrStep(Step):
                 raster_path = ctx.result(raster["step"]).path(raster["file"])
                 recognised = recognizer.recognize(raster_path, index=page["index"], dpi=sum(raster["dpi"]) / 2,
                                                   to_source=raster["to_source"])
+                recognised = _recover_edge_lines(recognizer, recognised, raster_path, raster)
                 recognised = inkgaps.find_empty_words(recognised, raster_path, raster["to_raster"],
                                                       raster["to_source"])
                 ctx.output.write_json(page_file(page["index"]), recognised)

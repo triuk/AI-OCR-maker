@@ -8,6 +8,7 @@ import pymupdf
 import pytest
 
 from fakes import TransformingPrepare, default_provider, run_and_export
+from layout_pdfs import LEFT, RIGHT, Print, printed_pdf
 from ocrmaker.steps import implementations
 from ocrmaker.store import ProjectStore
 from ocrmaker.workflow import Workflow
@@ -175,3 +176,27 @@ def test_local_ocr_records_each_pages_word_count_and_mean_confidence(columns):
 
     assert (record["step"], record["index"], record["words"]) == ("ocr", 0, len(ground_truth()))
     assert 80 < record["mean_confidence"] <= 100
+
+
+PARISH = ("Sbor dobrovolných hasičů oslavil sto let od svého založení. Na slavnosti vystoupila dechová hudba a děti "
+          "předvedly ukázku hašení malého požáru. ") * 4
+
+
+@pytest.mark.parametrize("footer", ["5", "– 5 –", "strana 5"])
+def test_an_isolated_centred_page_number_in_the_footer_is_not_lost(tmp_path, footer):
+    # Tesseract's automatic page segmentation drops a lone centred page number below two columns of text.
+    width = 12 + 6 * len(footer)
+    items = [Print("left", (LEFT[0], 40, LEFT[1], 500), PARISH), Print("right", (RIGHT[0], 40, RIGHT[1], 500), PARISH),
+             Print("footer", (210 - width / 2, 566, 210 + width / 2, 582), footer, size=10)]
+    workflow = Workflow(ProjectStore(tmp_path / "library"), language=None)
+    project = run_and_export(workflow, workflow.create(printed_pdf(tmp_path / "zpravodaj.pdf", [items]))["id"])
+
+    footers = [word for word in stored_words(workflow, project) if word["bbox"][1] > 550]
+    read = "".join(word["text"] for word in footers)
+    assert [char for char in read if char.isalnum()] == [char for char in footer if char.isalnum()]  # dashes vary
+    assert all(160 < word["bbox"][0] and word["bbox"][2] < 260 for word in footers)
+    kinds = {block["kind"] for block in workflow.overlay(project["id"], "layout", 0)["blocks"]
+             if block["bbox"][1] > 550}
+    assert kinds == {"footer"}
+    [markdown] = [output["name"] for output in workflow.outputs(project["id"]) if output["name"].endswith(".md")]
+    assert "printed=5" in workflow.output(project["id"], markdown).read_text(encoding="utf-8")

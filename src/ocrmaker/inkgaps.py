@@ -245,6 +245,61 @@ def _continues_vertically(page: _Page, top: int, bottom: int, start: int, end: i
     return bool(above[:, start:end].all(axis=0).mean() > 0.5 and below[:, start:end].all(axis=0).mean() > 0.5)
 
 
+# Edge bands: the top and bottom share of the page where running headers and footers (page numbers) lie.
+EDGE_BAND = 0.1
+# Uncovered ink in an edge band is a candidate line when its height is within these line heights, it is at
+# most this share of the page wide, and it keeps at least EDGE_MARGIN line heights from the page's sides
+# (ink at the sides is the binding's shadow or a scan edge).
+EDGE_LINE_HEIGHTS = (0.4, 2.5)
+EDGE_MAX_WIDTH = 0.5
+EDGE_MARGIN = 1.0
+# Ink pieces of a candidate line closer than this many line heights belong to it.
+EDGE_JOIN = 1.5
+
+
+def uncovered_edge_lines(recognised: dict, raster: Path, to_raster: Matrix) -> list[tuple[int, int, int, int]]:
+    """Boxes (raster pixels) of line-like ink in the page's top and bottom EDGE_BAND that no recognised line
+    covers: what Tesseract's page segmentation dropped there, typically an isolated centred page number.
+
+    Rules, underlines, solid areas and ink that runs on vertically (shadows, image edges) are left out."""
+    page = _Page(_grey(raster))
+    boxes = [_pixel_box(to_raster, line["bbox"]) for line in recognised["lines"]]
+    heights = sorted(box[3] - box[1] for box in boxes if box[3] > box[1])
+    line = heights[len(heights) // 2] if heights else 0.015 * page.height
+    margin = BOX_MARGIN * line
+    found = []
+    for top, bottom in ((0, round(EDGE_BAND * page.height)), (round((1 - EDGE_BAND) * page.height), page.height)):
+        if bottom <= top:
+            continue
+        mask = _erase_rules(page.ink(top, bottom, around=max(2, round(line))), RULE_LENGTH * line)
+        for x0, y0, x1, y1 in boxes:
+            a, b = max(0, int(y0 - margin) - top), min(bottom, int(y1 + margin) + 1) - top
+            if b > a:
+                mask[a:b, max(0, int(x0 - margin)):min(page.width, int(x1 + margin) + 1)] = False
+        for start, end in _runs(mask.any(axis=1)):
+            height = end - start
+            if not EDGE_LINE_HEIGHTS[0] * line <= height <= EDGE_LINE_HEIGHTS[1] * line:
+                continue
+            pieces = []
+            for left, right in _runs(mask[start:end].any(axis=0)):
+                if pieces and left - pieces[-1][1] <= EDGE_JOIN * line:
+                    pieces[-1][1] = right
+                else:
+                    pieces.append([left, right])
+            for left, right in pieces:
+                rows = numpy.flatnonzero(mask[start:end, left:right].any(axis=1))
+                y0, y1 = top + start + int(rows[0]), top + start + int(rows[-1]) + 1
+                box = (left, y0, right, y1)
+                fill = mask[y0 - top:y1 - top, left:right].mean()
+                if (right - left < MIN_WIDTH * line or right - left > EDGE_MAX_WIDTH * page.width
+                        or left < EDGE_MARGIN * line or right > page.width - EDGE_MARGIN * line
+                        or y1 - y0 < EDGE_LINE_HEIGHTS[0] * line or fill > MAX_FILL
+                        or _continues_vertically(page, y0, y1, left, right, y1 - y0)):
+                    continue
+                found.append(box)
+    return found
+
+
 # Public access for other local measurements on the same ink (AI reconstruction's word box merges and splits).
 InkPage = _Page
 ink_runs = _runs
