@@ -13,8 +13,9 @@ a Type0 font with Identity-H encoding whose every character id is drawn by one e
 Character ids are allocated per document, one per distinct character, and a ToUnicode CMap maps each back
 to its text, so any text (Czech diacritics included) copies exactly as it was stored. Each word is set in
 the page as displayed (upright), at the height of its word box with its baseline on the box's bottom edge,
-and horizontally scaled (Tz) to the box's width. Words of one line are separated by a space; a line ends
-without one. Line-end hyphenation stays as the words carry it.
+and horizontally scaled (Tz) to the box's width. Every word ends with a space, the last word of a line
+too, so that words of consecutive lines never merge when copied, even when the lines meet on one baseline.
+Line-end hyphenation stays as the words carry it (as printed).
 
 Two text strategies differ only in how characters are encoded; Export tries the second when verification
 of the first finds problems (`STRATEGIES`):
@@ -163,8 +164,10 @@ def _text_layer(font: _Font, page: dict, lines: list[list[dict]], resource: str)
     to_user = multiply(multiply(upright_to_display, invert(display)), invert(page["pdf_to_source"]))
     out = [f"q {_matrix(to_user)} cm BT 3 Tr"]
     for line in lines:
-        for position, word in enumerate(line):
-            text = word["text"] + (" " if position < len(line) - 1 else "")
+        for word in line:
+            # Every word, the last of a line included, ends with a space: words of consecutive lines that meet
+            # on one baseline (one printed line split by OCR, say) must not merge when the text is copied.
+            text = word["text"] + " "
             x0, y0, x1, y1 = apply_rect(display, word["bbox"])
             size = y1 - y0
             if size <= 0 or x1 <= x0 or not word["text"]:

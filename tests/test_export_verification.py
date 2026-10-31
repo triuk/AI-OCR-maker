@@ -5,10 +5,13 @@ import pymupdf
 import pytest
 
 from fakes import BrokenExport, TransformingPrepare, run_and_export
+from ocrmaker.step import Step
 from ocrmaker.steps import implementations
 from ocrmaker.store import ProjectStore
+from ocrmaker.words import page_file
 from ocrmaker.workflow import Workflow
 from pdfs import columns_pdf, ground_truth
+from test_reconstruction import PRINTED, run
 
 
 @pytest.fixture(scope="module")
@@ -143,3 +146,38 @@ def test_remaining_findings_are_listed_in_the_run_report(recognised):
         (word["id"], "outside_box", word["text"])]
     assert export["attempts"] == [{"strategy": "glyphless", "findings": 1}, {"strategy": "unicode", "findings": 1}]
     assert f"word {word['id']}: outside_box" in workflow.report_summary(project["id"])
+
+
+class TouchingLinesOcr(Step):
+    """Local OCR that reads the printed text exactly but cuts its first word ("Obecní") into two written lines
+    that touch on one baseline: "Obec" ends one line, "ní" starts the next one right where it ends."""
+
+    id = "ocr"
+
+    def run(self, ctx):
+        first, *rest = [item for item in PRINTED if item[1][1] == PRINTED[0][1][1]]
+        (text, box), middle = first, (first[1][0] + first[1][2]) / 2
+
+        def word(number, text, box):
+            return {"id": f"p1-w{number}", "text": text, "bbox": [round(value, 2) for value in box],
+                    "confidence": 96.0, "chars": []}
+
+        def line(number, words):
+            return {"id": f"p1-l{number}", "bbox": [words[0]["bbox"][0], words[0]["bbox"][1], words[-1]["bbox"][2],
+                                                    words[-1]["bbox"][3]],
+                    "baseline": None, "block": 0, "paragraph": 0, "words": words}
+
+        cut = [word(1, text[:4], [box[0], box[1], middle, box[3]])]
+        joined = [word(2, text[4:], [middle, box[1], box[2], box[3]])] + [
+            word(number, item[0], item[1]) for number, item in enumerate(rest, start=3)]
+        ctx.output.write_json(page_file(0), {"index": 0, "lines": [line(1, cut), line(2, joined)]})
+        ctx.output.write_json("ocr.json", {"engine": {"name": "touching"}, "pages": []})
+
+
+def test_words_of_consecutive_written_lines_on_one_baseline_do_not_merge_and_verify_clean(tmp_path, language_provider):
+    workflow, project = run(tmp_path, language_provider, TouchingLinesOcr())
+
+    assert written_words(workflow, project)[:3] == ["Obec", "ní", PRINTED[1][0]]
+    assert step(project, "export")["state"] == "done"
+    [record] = verification_records(workflow, project)
+    assert record["findings"] == []
