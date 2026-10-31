@@ -111,6 +111,7 @@ function renderWorkspace() {
     button.onclick = () => act(async () => { await api(`/projects/${p.id}/${offer.path}`, "POST"); await refresh(); });
     $("projectError").append(button);
   }
+  if (rerunAsked && rerunAsked.project !== p.id) hideRerunConfirm();
   renderSteps(p);
   renderStepPreview(p);
 }
@@ -130,6 +131,7 @@ let previewKey = "";
 function renderStepPreview(p) {
   const container = $("stepPreview");
   const step = p.steps.find(s => s.id === selectedStep);
+  updateRerunButton(p, step);
   if (!step) {
     previewKey = "";
     container.innerHTML = `<p class="placeholder">Klepnutím na krok pracovního postupu otevřete jeho náhled.</p>`;
@@ -142,9 +144,13 @@ function renderStepPreview(p) {
   const facts = [STATE_LABELS[step.state], step.started && `zahájeno ${dateTime(step.started)}`,
                  step.duration != null && `trvání ${seconds(step.duration)}`,
                  step.progress && `${step.progress.label || ""} ${step.progress.done}/${step.progress.total}`].filter(Boolean);
-  container.innerHTML = `<h2>${esc(step.label)}</h2><div class="facts">${esc(facts.join(" · "))}</div>
+  const rerunnable = step.implemented && step.state !== "pending";
+  container.innerHTML = `<div class="preview-head"><h2>${esc(step.label)}</h2>${rerunnable ? `<button id="rerunStep" type="button" title="Spustí krok znovu od čistého stavu; jeho výsledky i výsledky všech dalších kroků se nahradí">Spustit znovu</button>` : ""}</div>
+    <div class="facts">${esc(facts.join(" · "))}</div>
     ${step.message ? `<div class="notice ${step.state === "failed" ? "error" : ""}">${esc(step.message)}</div>` : ""}<div class="preview-body"></div>`;
   const body = container.querySelector(".preview-body");
+  if (rerunnable) container.querySelector("#rerunStep").onclick = () => act(() => rerunStep(p.id, step));
+  updateRerunButton(p, step);
   // Manual review opens as soon as automation has done its part, whatever its own state (it runs at export).
   const ready = ["done", "warning"].includes(step.state) || (step.manual && reviewReady(p, step));
   if (!step.implemented) body.innerHTML = `<p class="placeholder">Tento krok zatím není k dispozici.</p>`;
@@ -156,6 +162,46 @@ function renderStepPreview(p) {
     if (!preview) body.innerHTML = `<p class="placeholder">Tento krok zatím nemá náhled.</p>`;
     else await preview(body, p, step);
   });
+}
+
+// Rerun: the step and every later step start again from a clean slate. Rerunning a step before manual review
+// discards every manual correction, so the API first says how many and an in-page confirmation asks first.
+let rerunAsked = null;
+function updateRerunButton(p, step) {
+  const button = $("rerunStep");
+  if (button) button.disabled = p.running;
+  if (p.running && rerunAsked && rerunAsked.project === p.id) hideRerunConfirm();
+}
+function hideRerunConfirm() { rerunAsked = null; $("rerunConfirm").hidden = true; $("rerunConfirm").innerHTML = ""; }
+function askRerunConfirm(projectId, step, corrections) {
+  rerunAsked = {project: projectId, step: step.id, corrections};
+  const box = $("rerunConfirm");
+  box.innerHTML = `<p>Opakování kroku „${esc(step.label)}“ zahodí <strong>${corrections} ${plural(corrections, "ruční opravu", "ruční opravy", "ručních oprav")}</strong>.
+    Krok a všechny další kroky se spustí znovu od čistého stavu.</p>
+    <div class="confirm-actions"><button type="button" data-rerun-cancel>Zrušit</button>
+    <button type="button" class="danger" data-rerun-confirm>Zahodit opravy a spustit znovu</button></div>`;
+  box.querySelector("[data-rerun-cancel]").onclick = hideRerunConfirm;
+  box.querySelector("[data-rerun-confirm]").onclick = () => act(() => postRerun(projectId, step, corrections));
+  box.hidden = false;
+  box.querySelector("[data-rerun-cancel]").focus();
+}
+async function rerunStep(projectId, step) {
+  hideRerunConfirm();
+  const impact = await api(`/projects/${projectId}/steps/${encodeURIComponent(step.id)}/rerun`);
+  if (impact.corrections) askRerunConfirm(projectId, step, impact.corrections);
+  else await postRerun(projectId, step, 0);
+}
+async function postRerun(projectId, step, corrections) {
+  try {
+    await api(`/projects/${projectId}/steps/${encodeURIComponent(step.id)}/rerun`, "POST", {discard_corrections: corrections});
+  } catch (e) {
+    // The corrections changed since the count was shown (another tab): ask again with the new count.
+    if (e.status === 409 && e.data && e.data.corrections) return askRerunConfirm(projectId, step, e.data.corrections);
+    throw e;
+  }
+  hideRerunConfirm();
+  toast(corrections ? `Krok „${step.label}“ se spouští znovu; ruční opravy jsou zahozené.` : `Krok „${step.label}“ se spouští znovu.`);
+  await refresh();
 }
 
 // Every implemented step before the manual one has finished and nothing runs: the user can review.
@@ -193,7 +239,7 @@ async function refresh() {
 }
 
 function selectProject(id) {
-  if (id !== currentId) { selectedStep = null; previewKey = ""; }
+  if (id !== currentId) { selectedStep = null; previewKey = ""; hideRerunConfirm(); }
   currentId = id;
   try { localStorage.setItem("ocrmaker.project", id); } catch {}
   renderProjects(); renderWorkspace();

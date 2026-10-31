@@ -94,6 +94,10 @@ main { flex: 1; min-width: 0; padding: 20px 28px 12px; height: 100vh; overflow: 
 .notice .notice-action { display: block; margin-top: 9px; }
 .step-preview { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; min-height: 240px; }
 .step-preview h2 { margin-bottom: 6px; }
+.preview-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.rerun-confirm { white-space: normal; }
+.rerun-confirm p { margin: 0; }
+.rerun-confirm .confirm-actions { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 9px; }
 .step-preview .facts { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
 .step-preview .placeholder { color: var(--muted); padding: 40px 0; text-align: center; }
 

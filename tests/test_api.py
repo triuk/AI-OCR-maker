@@ -317,3 +317,86 @@ def test_the_run_report_and_its_summary_are_served_after_a_run(library, source_p
     assert summary.status_code == 200
     assert summary.headers["content-type"].startswith("text/plain; charset=utf-8")
     assert summary.text.startswith("# Run report: zpravodaj-2000-05")
+
+
+def test_a_rerun_confirmed_through_the_api_discards_corrections_of_every_kind_and_replaces_later_results(
+        library, source_pdf):
+    workflow, client = api_for(library, RecordingStep("import"), RecordingStep("ocr"), RecordingStep("review"))
+    pid = upload(client, source_pdf).json()["id"]
+    workflow.run(pid)
+    before = {s["id"]: s["run_id"] for s in client.get(f"/api/projects/{pid}").json()["steps"]}
+    ProjectStore(library).write_corrections(pid, [
+        {"id": "c1", "kind": "text", "page": 0, "ids": ["p1-w3"], "text": "Rychvald"},
+        {"id": "c2", "kind": "note", "page": 0, "box": [10, 10, 80, 40], "text": "Razítko"},
+        {"id": "c3", "kind": "article_order", "page": None, "articles": ["a2", "a1"]}])
+    rerun = f"/api/projects/{pid}/steps/ocr/rerun"
+
+    assert client.get(rerun).json() == {"corrections": 3, "steps": [
+        "ocr", "layout", "order", "problems", "reconstruct", "lookup", "review", "export"]}
+    refused = client.post(rerun, json={"discard_corrections": 2})
+    assert (refused.status_code, refused.json()) == (409, {"detail": "Opakování kroku zahodí 3 ruční opravy.",
+                                                           "corrections": 3})
+    assert len(client.get(f"/api/projects/{pid}/corrections").json()["corrections"]) == 3
+
+    assert client.post(rerun, json={"discard_corrections": 3}).status_code == 202
+    workflow.wait(pid, timeout=5)
+    after = {s["id"]: s for s in client.get(f"/api/projects/{pid}").json()["steps"]}
+    assert client.get(f"/api/projects/{pid}/corrections").json() == {"corrections": []}
+    assert after["import"]["run_id"] == before["import"]
+    assert after["ocr"]["state"] == "done" and after["ocr"]["run_id"] != before["ocr"]
+
+
+def test_a_rerun_without_corrections_needs_no_confirmation(library, source_pdf):
+    ocr = RecordingStep("ocr")
+    workflow, client = api_for(library, RecordingStep("import"), ocr)
+    pid = upload(client, source_pdf).json()["id"]
+    workflow.run(pid)
+
+    assert client.get(f"/api/projects/{pid}/steps/ocr/rerun").json()["corrections"] == 0
+    assert client.post(f"/api/projects/{pid}/steps/ocr/rerun").status_code == 202
+    workflow.wait(pid, timeout=5)
+    assert ocr.calls == 2
+
+
+def test_a_rerun_of_a_busy_project_is_refused_without_asking_for_confirmation(library, source_pdf):
+    blocking = BlockingStep("ocr")
+    workflow, client = api_for(library, RecordingStep("import"), blocking)
+    pid = upload(client, source_pdf).json()["id"]
+    ProjectStore(library).write_corrections(pid, [{"id": "c1", "kind": "note", "page": 0, "text": "Razítko"}])
+    client.post(f"/api/projects/{pid}/run")
+    assert blocking.entered.wait(5)
+
+    refused = client.post(f"/api/projects/{pid}/steps/import/rerun", json={})
+
+    assert (refused.status_code, refused.json()) == (409, {"detail": "Projekt se právě zpracovává. "
+                                                                     "Nejprve zpracování zastavte."})
+    blocking.release.set()
+    workflow.wait(pid, timeout=5)
+
+
+def test_rerunning_an_unknown_step_is_not_found(library, source_pdf):
+    workflow, client = api_for(library, RecordingStep("import"))
+    pid = upload(client, source_pdf).json()["id"]
+
+    assert client.get(f"/api/projects/{pid}/steps/nonsense/rerun").status_code == 404
+    assert client.post(f"/api/projects/{pid}/steps/nonsense/rerun").json()["detail"] == "Krok neexistuje."
+
+
+def test_stopping_a_rerun_keeps_earlier_results_and_returns_the_interrupted_step_to_pending(library, source_pdf):
+    blocking = BlockingStep("ocr")
+    workflow, client = api_for(library, RecordingStep("import"), blocking, RecordingStep("layout"))
+    pid = upload(client, source_pdf).json()["id"]
+    blocking.release.set()
+    workflow.run(pid)
+    blocking.release.clear()
+    blocking.entered.clear()
+
+    client.post(f"/api/projects/{pid}/steps/ocr/rerun")
+    assert blocking.entered.wait(5)
+    assert client.post(f"/api/projects/{pid}/stop").json() == {"stopping": True}
+    workflow.wait(pid, timeout=5)
+
+    stopped = client.get(f"/api/projects/{pid}").json()
+    assert stopped["running"] is False
+    assert [s["state"] for s in stopped["steps"][:4]] == ["done", "pending", "pending", "pending"]
+    assert client.post(f"/api/projects/{pid}/stop").json() == {"stopping": False}

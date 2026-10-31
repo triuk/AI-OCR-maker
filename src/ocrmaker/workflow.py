@@ -126,11 +126,11 @@ class Workflow:
 
     def run(self, project_id: str) -> dict:
         """Run the automatic steps that are not finished yet, up to the first manual step (manual review)."""
-        return self._operate(project_id, self._plan_run(project_id), operation="run")
+        return self._operate(project_id, lambda: self._plan_run(project_id), operation="run")
 
     def export(self, project_id: str) -> dict:
         """Run manual review's closing work and every step after it (Export), always anew."""
-        return self._operate(project_id, self._plan_export(project_id), operation="export")
+        return self._operate(project_id, lambda: self._plan_export(project_id), operation="export")
 
     def rerun(self, project_id: str, step_id: str, *, discard_corrections: int | None = None) -> dict:
         """Invalidate a step and every later step, then run again from it.
@@ -138,7 +138,7 @@ class Workflow:
         If manual corrections would be discarded, their count must be passed as discard_corrections,
         otherwise ConfirmationRequired is raised and nothing changes.
         """
-        return self._operate(project_id, self._plan_rerun(project_id, step_id, discard_corrections),
+        return self._operate(project_id, lambda: self._plan_rerun(project_id, step_id, discard_corrections),
                              operation="rerun")
 
     def remove_text_layer(self, project_id: str) -> dict:
@@ -147,7 +147,7 @@ class Workflow:
         The clean copy becomes the base of every step and of the export (base_pdf); the source PDF stays as it
         is. A PDF with visible text, or without any text layer, is refused (ValueError, Czech).
         """
-        return self._operate(project_id, self._plan_remove_text_layer(project_id))
+        return self._operate(project_id, lambda: self._plan_remove_text_layer(project_id))
 
     def start(self, project_id: str, operation: str = "run", **options) -> dict:
         """Start run, export, rerun (with step_id, discard_corrections) or remove_text_layer in the background.
@@ -158,7 +158,7 @@ class Workflow:
                  REMOVE_ACTION: self._plan_remove_text_layer}
         if operation not in plans:
             raise ValueError("Neznámá operace pracovního postupu.")
-        return self._operate(project_id, plans[operation](project_id, **options), background=True,
+        return self._operate(project_id, lambda: plans[operation](project_id, **options), background=True,
                              operation=operation)
 
     def stop(self, project_id: str) -> bool:
@@ -437,9 +437,15 @@ class Workflow:
 
     # Execution ---------------------------------------------------------------------------------------
 
-    def _operate(self, project_id: str, work: Callable[[str, threading.Event], None], *,
+    def _operate(self, project_id: str, plan: Callable[[], Callable[[str, threading.Event], None]], *,
                  background: bool = False, operation: str = "run") -> dict:
+        """Take the run lock, then plan under it, so its checks (the discard count) see what the work will find."""
         lock = self._lock(project_id)
+        try:
+            work = plan()
+        except BaseException:
+            lock.release()
+            raise
         stop = threading.Event()
         run_id = new_run_id()
 
