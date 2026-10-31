@@ -31,7 +31,7 @@ from .store import ProjectStore, now
 PENDING, RUNNING, DONE, WARNING, FAILED = "pending", "running", "done", "warning", "failed"
 FINISHED = (DONE, WARNING)
 REMOVE_ACTION = existing_text.REMOVE_ACTION
-# Progress is written to the project document at most this often (seconds).
+# Progress is written to the project file at most this often (seconds).
 PROGRESS_INTERVAL = 0.25
 # Manual corrections belong to the review; rerunning a step before it discards them (ADR 0004).
 FIRST_MANUAL = next(index for index, definition in enumerate(STEPS) if definition.manual)
@@ -94,23 +94,23 @@ class Workflow:
         file_name = Path(file_name or source_pdf.name).name
         facts = inspect_source(source_pdf)
         name = (name or "").strip() or Path(file_name).stem
-        document = {
+        project = {
             "name": name,
             "source": {"file_name": file_name, **facts},
             "settings": project_settings.merged({}, settings or {}),
             "steps": {definition.id: _pending_step() for definition in STEPS},
         }
-        return self._view(self.store.create(source_pdf, document))
+        return self._view(self.store.create(source_pdf, project))
 
     def list(self) -> list[dict]:
-        return [self._view(document) for document in self.store.list()]
+        return [self._view(project) for project in self.store.list()]
 
     def get(self, project_id: str) -> dict:
         return self._view(self.store.get(project_id))
 
     def update_settings(self, project_id: str, changes: dict) -> dict:
-        def change(document):
-            document["settings"] = project_settings.merged(document["settings"], changes)
+        def change(project):
+            project["settings"] = project_settings.merged(project["settings"], changes)
         return self._view(self.store.mutate(project_id, change))
 
     def delete(self, project_id: str) -> None:
@@ -206,9 +206,9 @@ class Workflow:
     def result(self, project_id: str, step_id: str) -> StepResult | None:
         """The committed result of a finished step, or None."""
         self._step_index(step_id)
-        document = self.store.get(project_id)
+        project = self.store.get(project_id)
         directory = self.store.result_dir(project_id, step_id)
-        if document["steps"][step_id]["state"] not in FINISHED or not directory.is_dir():
+        if project["steps"][step_id]["state"] not in FINISHED or not directory.is_dir():
             return None
         return StepResult(directory)
 
@@ -394,9 +394,9 @@ class Workflow:
         return lambda run_id, stop: self._run_automatic(project_id, run_id, stop)
 
     def _plan_export(self, project_id: str) -> Callable[[str, threading.Event], None]:
-        document = self.store.get(project_id)
+        project = self.store.get(project_id)
         unfinished = [d.label for d in STEPS[:FIRST_MANUAL]
-                      if d.id in self.steps and document["steps"][d.id]["state"] not in FINISHED]
+                      if d.id in self.steps and project["steps"][d.id]["state"] not in FINISHED]
         if unfinished:
             raise ValueError(f"Nejprve dokončete automatické zpracování (chybí: {', '.join(unfinished)}).")
         if not any(d.id in self.steps for d in STEPS[FIRST_MANUAL:]):
@@ -444,11 +444,11 @@ class Workflow:
                     f"Odstranění textové vrstvy skončilo neočekávanou chybou: {exc}"
                 diagnostics.record(run_id, "text_layer_removal", outcome=FAILED, message=message,
                                    error=traceback.format_exc(), **facts)
-                self.store.mutate(project_id, lambda document: document["steps"][PAGES_STEP].update(
+                self.store.mutate(project_id, lambda project: project["steps"][PAGES_STEP].update(
                     state=FAILED, message=message, action=None))
                 return
             removal = {"pages": layer["pages"], "words": layer["words"], "created": now()}
-            self.store.mutate(project_id, lambda document: document.update(working_copy=removal))
+            self.store.mutate(project_id, lambda project: project.update(working_copy=removal))
             diagnostics.record(run_id, "text_layer_removal", outcome="removed", images=removed["images"],
                                seconds=round(time.monotonic() - clock, 3), **facts)
             rerun(run_id, stop)
@@ -517,10 +517,10 @@ class Workflow:
         diagnostics = Diagnostics(self.store.diagnostics_dir(project_id))
         started, clock = now(), time.monotonic()
 
-        def begin(document):
-            document["steps"][definition.id] = _pending_step() | {"state": RUNNING, "started": started,
+        def begin(project):
+            project["steps"][definition.id] = _pending_step() | {"state": RUNNING, "started": started,
                                                                   "run_id": run_id}
-        document = self.store.mutate(project_id, begin)
+        project = self.store.mutate(project_id, begin)
         diagnostics.record(run_id, "step_started", step=definition.id, started=started)
         staging = self.store.new_result_dir(project_id, definition.id)
         last_progress = [0.0]
@@ -534,12 +534,12 @@ class Workflow:
             # A rough estimate of the time left: the step's pace so far over the units still to do.
             remaining = round((moment - clock) / done * (total - done), 1) if 0 < done < total else None
 
-            def change(document):
-                document["steps"][definition.id]["progress"] = {"done": done, "total": total, "label": label,
+            def change(project):
+                project["steps"][definition.id]["progress"] = {"done": done, "total": total, "label": label,
                                                                 "remaining": remaining}
             self.store.mutate(project_id, change)
 
-        settings = project_settings.merged(document["settings"], {})
+        settings = project_settings.merged(project["settings"], {})
         context = StepContext(
             step_id=definition.id, project_id=project_id, run_id=run_id, settings=settings,
             source_pdf=self.store.base_pdf(project_id), output=StepOutput(staging),
@@ -548,7 +548,7 @@ class Workflow:
                                                                                      **data)),
             results=lambda step_id: self.result(project_id, step_id), progress=progress, stopped=stop.is_set,
             record=lambda kind, **data: diagnostics.record(run_id, kind, **data),
-            source_name=document["source"]["file_name"],
+            source_name=project["source"]["file_name"],
             corrections=lambda: self.store.corrections(project_id))
         error = action = None
         try:
@@ -570,8 +570,8 @@ class Workflow:
             shutil.rmtree(staging, ignore_errors=True)
         finished, duration = now(), round(time.monotonic() - clock, 3)
 
-        def end(document):
-            entry = document["steps"][definition.id]
+        def end(project):
+            entry = project["steps"][definition.id]
             entry.update(state=state, message=message, progress=None, action=action)
             if state == PENDING:
                 entry.update(started=None, run_id=None)
@@ -601,9 +601,9 @@ class Workflow:
         for step_id in step_ids:
             self.store.discard_result(project_id, step_id)
 
-        def change(document):
+        def change(project):
             for step_id in step_ids:
-                document["steps"][step_id] = _pending_step()
+                project["steps"][step_id] = _pending_step()
         self.store.mutate(project_id, change)
 
     # Helpers -----------------------------------------------------------------------------------------
@@ -619,11 +619,11 @@ class Workflow:
 
     def _review(self, project_id: str) -> _Results:
         """The results manual review reads, once every automatic step before it has finished."""
-        document = self.store.get(project_id)
+        project = self.store.get(project_id)
         if manual.REVIEW_STEP not in self.steps:
             raise ValueError("Ruční kontrola zatím není k dispozici.")
         unfinished = [d.label for d in STEPS[:FIRST_MANUAL]
-                      if d.id in self.steps and document["steps"][d.id]["state"] not in FINISHED]
+                      if d.id in self.steps and project["steps"][d.id]["state"] not in FINISHED]
         if unfinished:
             raise ValueError("Ruční kontrola bude k dispozici po dokončení automatického zpracování "
                              f"(chybí: {', '.join(unfinished)}).")
@@ -637,10 +637,10 @@ class Workflow:
 
     def _recover(self) -> None:
         """A step left running by a crash returns to pending; projects a live run holds are left alone."""
-        for document in self.store.list():
-            if not any(entry["state"] == RUNNING for entry in document["steps"].values()):
+        for project in self.store.list():
+            if not any(entry["state"] == RUNNING for entry in project["steps"].values()):
                 continue
-            lock = self.store.run_lock(document["id"])
+            lock = self.store.run_lock(project["id"])
             try:
                 lock.acquire()
             except BlockingIOError:
@@ -650,13 +650,13 @@ class Workflow:
                     for step_id, entry in doc["steps"].items():
                         if entry["state"] == RUNNING:
                             doc["steps"][step_id] = _pending_step()
-                self.store.mutate(document["id"], change)
+                self.store.mutate(project["id"], change)
             finally:
                 lock.release()
 
-    def _view(self, document: dict) -> dict:
+    def _view(self, project: dict) -> dict:
         """The project as callers see it: step states in workflow order with their Czech labels."""
         steps = [{"id": d.id, "label": d.label, "manual": d.manual, "implemented": d.id in self.steps,
-                  **document["steps"].get(d.id, _pending_step())} for d in STEPS]
-        return ({key: value for key, value in document.items() if key != "steps"}
-                | {"steps": steps, "running": self.running(document["id"])})
+                  **project["steps"].get(d.id, _pending_step())} for d in STEPS]
+        return ({key: value for key, value in project.items() if key != "steps"}
+                | {"steps": steps, "running": self.running(project["id"])})

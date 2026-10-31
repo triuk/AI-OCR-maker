@@ -69,13 +69,13 @@ class RunReports:
         return path if path.is_file() else None
 
 
-def build(document: dict, run: dict, diagnostics: Diagnostics, steps: dict[str, Step],
+def build(project: dict, run: dict, diagnostics: Diagnostics, steps: dict[str, Step],
           results: Callable[[str], StepResult | None]) -> tuple[dict, str]:
-    """The report JSON and its human summary for a project document as a run left it.
+    """The report JSON and its human summary for a project as a run left it.
 
     run is {"id", "operation", "started", "finished", "duration"}; results gives a step's committed result.
     """
-    entries = [{"id": step_id, **{key: document["steps"][step_id].get(key) for key in
+    entries = [{"id": step_id, **{key: project["steps"][step_id].get(key) for key in
                                   ("state", "started", "finished", "duration", "message", "run_id")}}
                for step_id in STEP_IDS]
     run_ids = sorted({entry["run_id"] for entry in entries if entry["run_id"]} | {run["id"]})
@@ -90,9 +90,9 @@ def build(document: dict, run: dict, diagnostics: Diagnostics, steps: dict[str, 
     report = {
         "report": REPORT_VERSION,
         "generated": run["finished"],
-        "project": {"id": document["id"], "name": document["name"],
-                    "source": {key: document["source"].get(key) for key in ("file_name", "pages")},
-                    "settings": document["settings"]},
+        "project": {"id": project["id"], "name": project["name"],
+                    "source": {key: project["source"].get(key) for key in ("file_name", "pages")},
+                    "settings": project["settings"]},
         "run": {**run, "steps": executed},
         "steps": entries,
         "ai": {"requests": requests, "totals": _totals(requests)},

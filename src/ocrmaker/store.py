@@ -1,7 +1,7 @@
 """Project store: one directory per project, written atomically; the source PDF copy is never modified.
 
 Layout of `<root>/projects/<id>/`:
-    project.json          the project document (name, source facts, settings, step states)
+    project.json          the project file (name, source facts, settings, step states)
     source.pdf            a read-only copy of the user's source PDF
     working.pdf           the clean working copy, once an earlier OCR's text layer was removed (read-only)
     steps/<step id>/      the committed result of each step (see ocrmaker.step.StepResult)
@@ -91,8 +91,8 @@ class ProjectStore:
 
     # Documents ---------------------------------------------------------------------------------------
 
-    def create(self, source: Path, document: dict) -> dict:
-        """Copy the source PDF into a new project and write its document; both appear at once or not at all."""
+    def create(self, source: Path, project: dict) -> dict:
+        """Copy the source PDF into a new project and write its project file; both appear at once or not at all."""
         project_id = uuid.uuid4().hex
         staging = self.projects / f".new-{project_id}"
         staging.mkdir()
@@ -105,15 +105,15 @@ class ProjectStore:
                     writer.write(chunk)
             copy.chmod(stat.S_IRUSR | stat.S_IRGRP)
             created = now()
-            document = {**document, "id": project_id, "created": created, "updated": created, "version": 1}
-            document["source"] = {**document.get("source", {}), "size": copy.stat().st_size,
+            project = {**project, "id": project_id, "created": created, "updated": created, "version": 1}
+            project["source"] = {**project.get("source", {}), "size": copy.stat().st_size,
                                   "sha256": digest.hexdigest()}
-            write_json_atomic(staging / PROJECT_FILE, document)
+            write_json_atomic(staging / PROJECT_FILE, project)
             staging.rename(self.directory(project_id))
         except BaseException:
             shutil.rmtree(staging, ignore_errors=True)
             raise
-        return document
+        return project
 
     def get(self, project_id: str) -> dict:
         path = self.directory(project_id) / PROJECT_FILE
@@ -123,25 +123,25 @@ class ProjectStore:
             raise KeyError("Projekt neexistuje.") from None
 
     def list(self) -> list[dict]:
-        documents = []
+        projects = []
         for directory in self.projects.iterdir():
             if directory.name.startswith(".") or not (directory / PROJECT_FILE).is_file():
                 continue
             try:
-                documents.append(self.get(directory.name))
+                projects.append(self.get(directory.name))
             except (KeyError, ValueError):
                 continue
-        return sorted(documents, key=lambda d: d["created"], reverse=True)
+        return sorted(projects, key=lambda d: d["created"], reverse=True)
 
     def mutate(self, project_id: str, change: Callable[[dict], None]) -> dict:
-        """The single write path of a project document: load, change in place, bump the version, write."""
+        """The single write path of a project file: load, change in place, bump the version, write."""
         with self._lock:
-            document = self.get(project_id)
-            change(document)
-            document["version"] += 1
-            document["updated"] = now()
-            write_json_atomic(self.directory(project_id) / PROJECT_FILE, document)
-            return document
+            project = self.get(project_id)
+            change(project)
+            project["version"] += 1
+            project["updated"] = now()
+            write_json_atomic(self.directory(project_id) / PROJECT_FILE, project)
+            return project
 
     def delete(self, project_id: str) -> None:
         """Remove a project; the caller holds its run lock. A rename first makes it vanish from the list at once."""
