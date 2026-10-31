@@ -12,19 +12,20 @@ the setting `reconstruction_accept_confidence` and it names at least one source 
 
 Only settled spots get a record in `reconstructions`, in the reconstruction record format with
 `"source": "web"`, `"status": "accepted"` and the extra fields `queries`, `answer` and `sources`;
-`ocrmaker.transcription` lays it over AI reconstruction's record. An unsettled spot keeps AI
-reconstruction's illegible marker. With the setting `web_lookup` switched off the step searches nothing and
-every unresolved spot keeps its marker.
+`ocrmaker.transcription` lays it over AI reconstruction's record. An unsettled spot keeps what AI
+reconstruction wrote: the illegible marker, or a doubtful reading kept as read. With the setting `web_lookup`
+switched off the step searches nothing and every unresolved spot stays as it is.
 
 The Web lookup result (`steps/lookup/`) holds `lookup.json`:
 
     {"enabled": true, "threshold": 80.0,
      "pages": [{"index": 0, "file": "pages/page-0001.json", "spots": 2, "searched": 2, "settled": 1,
-                "markers": 1, "rejected": null}],
-     "total": {"spots": 2, "searched": 2, "settled": 1, "markers": 1}}
+                "markers": 1, "kept": 0, "rejected": null}],
+     "total": {"spots": 2, "searched": 2, "settled": 1, "markers": 1, "kept": 0}}
 
 (spots: unresolved spots handed over, searched: those sent to the web, settled: those the web settled,
-markers: illegible markers left) and one page file per page, `pages/page-0001.json`:
+markers: illegible markers left, kept: doubtful readings left as read) and one page file per page,
+`pages/page-0001.json`:
 
     {"index": 0,
      "request": {"provider", "model", "usage"} | null,
@@ -34,7 +35,8 @@ markers: illegible markers left) and one page file per page, `pages/page-0001.js
                                                  # unavailable | rejected | disabled
         "queries": ["..."],              # the queries built (sent), or those the AI reports it ran
         "words": ["Rychvald"] | null, "confidence": 90.0 | null, "answer": "..." | null,
-        "sources": ["https://..."], "reasoning": "..." | null, "problems": [...]}],  # problems: invalid items
+        "sources": ["https://..."], "reasoning": "..." | null, "problems": [...],    # problems: invalid items
+        "left": [{"id", "text", "bbox", "hint"}]}],  # what AI reconstruction wrote, kept unless settled
      "reconstructions": [<reconstruction record, "source": "web", plus "queries", "answer", "sources">]}
 """
 from __future__ import annotations

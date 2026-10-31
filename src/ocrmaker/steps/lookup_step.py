@@ -1,8 +1,8 @@
 """Web lookup: the last automatic attempt at the spots AI reconstruction left unresolved (format in `ocrmaker.lookup`).
 
 One request per page with unresolved spots, with web search, carrying only short snippets and the spots'
-crops. Settled spots get a reconstruction record with `"source": "web"`; the others keep their illegible
-marker. Switched off in the settings, the step searches nothing. Without any AI provider it warns once; an
+crops. Settled spots get a reconstruction record with `"source": "web"`; the others keep what AI
+reconstruction wrote (the illegible marker, or a doubtful reading kept as read). Switched off in the settings, the step searches nothing. Without any AI provider it warns once; an
 invalid answer is rejected for its page, with a warning; any other AI failure fails the step.
 """
 from __future__ import annotations
@@ -29,11 +29,12 @@ def _page_list(numbers: list[int]) -> str:
 
 def _counts(entry: dict, unresolved: list[dict]) -> dict:
     settled = {tuple(item["ids"]) for item in entry["lookups"] if item["outcome"] == rules.SETTLED}
+    left = [word["text"] for record in unresolved if tuple(record["ids"]) not in settled for word in record["words"]]
     return {"spots": sum(len(record["ids"]) for record in unresolved),
             "searched": sum(len(item["ids"]) for item in entry["lookups"]
                             if item["outcome"] not in (rules.NO_QUERY, rules.UNAVAILABLE, rules.DISABLED)),
             "settled": sum(len(ids) for ids in settled),
-            "markers": sum(len(record["words"]) for record in unresolved if tuple(record["ids"]) not in settled)}
+            "markers": sum(text == MARKER for text in left), "kept": sum(text != MARKER for text in left)}
 
 
 def _unresolved(result: StepResult | None, index: int) -> list[dict]:
@@ -90,16 +91,16 @@ class LookupStep(Step):
                        seconds=round(time.monotonic() - started, 3))
         ctx.progress(len(pages), len(pages), f"Stránka {len(pages)} z {len(pages)}")
         total = {key: sum(summary[key] for summary in summaries)
-                 for key in ("spots", "searched", "settled", "markers")}
+                 for key in ("spots", "searched", "settled", "markers", "kept")}
         ctx.output.write_json(rules.LOOKUP_FILE, {"enabled": enabled, "threshold": threshold, "pages": summaries,
                                                   "total": total})
         if unavailable is not None:
             ctx.warn(f"AI není k dispozici ({unavailable}), dohledání na webu proto neproběhlo a nevyřešená "
-                     f"místa si ponechala značku {MARKER}.")
+                     f"místa zůstala, jak jsou (značka {MARKER}, nebo pochybné čtení z OCR).")
         if rejected:
             where = "na straně" if len(rejected) == 1 else "na stranách"
             ctx.warn(f"AI vrátila neplatnou odpověď dohledání na webu {where} {_page_list(rejected)}; odpověď byla "
-                     f"odmítnuta a tamní místa si ponechala značku {MARKER}.")
+                     "odmítnuta a tamní místa zůstala nevyřešená.")
         if invalid:
             where = "na straně" if len(invalid) == 1 else "na stranách"
             ctx.warn(f"Některé výsledky dohledání na webu {where} {_page_list(invalid)} byly neplatné (například "
@@ -186,8 +187,9 @@ class LookupStep(Step):
                 "answer": raw["answer"][:rules.MAX_ANSWER_CHARS] if raw.get("answer") else None,
                 "sources": list(raw.get("sources") or []), "reasoning": raw.get("reasoning"),
                 "problems": list(problems),
-                # The illegible markers AI reconstruction wrote for the spot (what stays unless it is settled).
-                "markers": [{key: word.get(key) for key in ("id", "bbox", "hint")} for word in record["words"]]}
+                # What AI reconstruction wrote for the spot, which stays unless it is settled: the illegible
+                # marker, or a doubtful reading kept as read.
+                "left": [{key: word.get(key) for key in ("id", "text", "bbox", "hint")} for word in record["words"]]}
 
     def overlay(self, result: StepResult, page: int) -> dict | None:
         """The words the web settled and the illegible markers left, each with its queries, answer and sources."""
@@ -210,16 +212,16 @@ class LookupStep(Step):
                            "hint": hint, "provider": record["provider"], "model": record["model"]}
                           for word in record["words"]]
             else:
-                shown += [{**base, "id": word["id"], "bbox": word["bbox"], "text": MARKER, "status": "unresolved",
-                           "hint": word["hint"]} for word in item["markers"]]
+                shown += [{**base, "id": word["id"], "bbox": word["bbox"], "text": word["text"],
+                           "status": "unresolved", "hint": word["hint"]} for word in item["left"]]
         return {"enabled": summary["enabled"], "words": shown,
-                "counts": {key: counts.get(key, 0) for key in ("spots", "searched", "settled", "markers")},
+                "counts": {key: counts.get(key, 0) for key in ("spots", "searched", "settled", "markers", "kept")},
                 "rejected": entry["rejected"]}
 
     def report(self, result: StepResult) -> ReportSection:
         """Spots looked up, settled by the web and left as markers, per page and in total; the settled words."""
         summary_data = result.read_json(rules.LOOKUP_FILE)
-        pages = [{key: page[key] for key in ("index", "spots", "searched", "settled", "markers", "rejected")}
+        pages = [{key: page[key] for key in ("index", "spots", "searched", "settled", "markers", "kept", "rejected")}
                  for page in summary_data["pages"]]
         settled = []
         for page in summary_data["pages"]:
@@ -231,12 +233,14 @@ class LookupStep(Step):
                          "answer": record["answer"], "sources": record["sources"]}
                         for record in entry["reconstructions"]]
         total = summary_data["total"]
+        left = (f"{total['markers']} illegible markers and {total['kept']} doubtful "
+                f"reading{'' if total['kept'] == 1 else 's'} kept as read")
         if not summary_data["enabled"]:
             summary = [f"Web lookup is switched off in the project settings: {total['spots']} unresolved spots "
-                       f"kept {total['markers']} illegible markers."]
+                       f"left {left}."]
         else:
             summary = [f"{total['spots']} unresolved spots, {total['searched']} looked up on the web: "
-                       f"{total['settled']} settled by a web source, {total['markers']} illegible markers remain "
+                       f"{total['settled']} settled by a web source, {left} remain "
                        f"(accepted from confidence {summary_data['threshold']})."]
         rejected = [page for page in pages if page["rejected"]]
         if rejected:

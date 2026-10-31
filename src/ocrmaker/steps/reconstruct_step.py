@@ -1,9 +1,11 @@
 """AI reconstruction: one AI request per page with problem spots determines their printed text (ADR 0001).
 
 The request, the answer, the outcome and the result format are described in `ocrmaker.reconstruction`.
-An answer that addresses anything but the marked spots, or breaks the schema, is rejected and the page's
-spots get the illegible marker, with a warning. Without any AI provider every spot gets the marker and the
-step warns once; any other AI failure (usage limit, login, timeout) fails the step with its Czech message.
+A spot left unresolved keeps its printed OCR text when it is a doubtful reading and gets the illegible marker
+when it is an unreadable word (ADR 0001); either way it stays listed for manual review. Answer items that
+address anything but the marked spots, or break the schema, are rejected with a warning, and their spots stay
+unresolved. Without any AI provider every spot stays unresolved and the step warns once; any other AI
+failure (usage limit, login, timeout) fails the step with its Czech message.
 """
 from __future__ import annotations
 
@@ -30,9 +32,10 @@ def _page_list(numbers: list[int]) -> str:
 
 
 def _counts(records: list[dict]) -> dict:
+    left = [word["text"] for record in records if record["status"] == UNRESOLVED for word in record["words"]]
     return {"spots": sum(len(record["ids"]) for record in records),
             "resolved": sum(len(record["ids"]) for record in records if record["status"] != UNRESOLVED),
-            "markers": sum(len(record["words"]) for record in records if record["status"] == UNRESOLVED),
+            "markers": sum(text == MARKER for text in left), "kept": sum(text != MARKER for text in left),
             "publisher_errors": sum(record["status"] == PUBLISHER_ERROR for record in records)}
 
 
@@ -46,7 +49,7 @@ class ReconstructStep(Step):
         order = ctx.result(ORDER_STEP).read_json(ORDER_FILE) if ctx.has_result(ORDER_STEP) else {"pages": []}
         order_pages = {item["index"]: item for item in order["pages"]}
         threshold = float(ctx.settings.get(THRESHOLD_SETTING, rules.DEFAULT_THRESHOLD))
-        summaries, rejected = [], []
+        summaries, rejected, ignored = [], [], []
         unavailable: str | None = None
         for page in pages:
             ctx.checkpoint()
@@ -54,13 +57,13 @@ class ReconstructStep(Step):
             ctx.progress(index, len(pages), f"Stránka {number} z {len(pages)}")
             started = time.monotonic()
             spots = (problems.read_json(page_file(index))["spots"] if problems.exists(page_file(index)) else [])
-            entry = {"index": index, "request": None, "rejected": None, "reconstructions": []}
+            entry = {"index": index, "request": None, "rejected": None, "ignored": [], "reconstructions": []}
             if spots:
                 recognised = read_page(ocr, index) or {"index": index, "lines": []}
                 layout = read_layout_page(layout_result, index) if layout_result else None
                 articles = (order_pages.get(index) or {}).get("articles")
                 prepared = self._prepare(ctx, page, recognised, layout, articles, spots)
-                answer = None
+                answer, readings = None, []
                 if unavailable is None:
                     try:
                         answer = ctx.language.ask(rules.INSTRUCTIONS, prepared["data"], schema=rules.SCHEMA,
@@ -74,14 +77,21 @@ class ReconstructStep(Step):
                             entry["rejected"] = f"{exc.code}: {exc}"
                 if answer is not None:
                     entry["request"] = {"provider": answer.provider, "model": answer.model, "usage": answer.usage}
-                    found = rules.validate(answer.data, prepared["spots"], prepared["positions"])
-                    if found:
-                        entry["rejected"] = "; ".join(found)
+                    try:
+                        readings, entry["ignored"] = rules.validate(answer.data, prepared["spots"],
+                                                                    prepared["positions"])
+                    except ValueError as exc:
+                        entry["rejected"] = str(exc)
                         answer = None
                 if entry["rejected"]:
                     rejected.append(number)
+                if entry["ignored"]:
+                    ignored.append(number)
                 reason = "rejected" if entry["rejected"] else "unavailable" if unavailable else "no_answer"
-                entry["reconstructions"] = self._records(prepared, answer, threshold, reason)
+                refused = {word_id for item in entry["ignored"] if isinstance(item["item"], dict)
+                           and isinstance(item["item"].get("ids"), list) for word_id in item["item"]["ids"]
+                           if isinstance(word_id, str)}
+                entry["reconstructions"] = self._records(prepared, answer, readings, threshold, reason, refused)
             ctx.output.write_json(page_file(index), entry)
             counts = _counts(entry["reconstructions"])
             summary = {"index": index, "file": page_file(index), **counts, "rejected": entry["rejected"]}
@@ -91,16 +101,20 @@ class ReconstructStep(Step):
                        seconds=round(time.monotonic() - started, 3))
         ctx.progress(len(pages), len(pages), f"Stránka {len(pages)} z {len(pages)}")
         total = {key: sum(summary[key] for summary in summaries)
-                 for key in ("spots", "resolved", "markers", "publisher_errors")}
+                 for key in ("spots", "resolved", "markers", "kept", "publisher_errors")}
         ctx.output.write_json(rules.RECONSTRUCT_FILE, {"threshold": threshold, "pages": summaries, "total": total})
         if unavailable is not None:
-            ctx.warn(f"AI není k dispozici ({unavailable}), problémová místa proto dostala značku {MARKER} "
-                     "a čekají na ruční kontrolu.")
+            ctx.warn(f"AI není k dispozici ({unavailable}), problémová místa proto zůstala nevyřešená: nečitelná "
+                     f"slova dostala značku {MARKER}, pochybná čtení si ponechala text z OCR; obojí čeká na ruční "
+                     "kontrolu.")
         if rejected:
             where = "na straně" if len(rejected) == 1 else "na stranách"
-            ctx.warn(f"AI vrátila neplatnou rekonstrukci {where} {_page_list(rejected)} (odpověď mimo označená "
-                     f"místa nebo v chybném tvaru); odpověď byla odmítnuta a tamní problémová místa dostala "
-                     f"značku {MARKER}.")
+            ctx.warn(f"AI vrátila neplatnou rekonstrukci {where} {_page_list(rejected)} (odpověď v chybném tvaru); "
+                     "odpověď byla odmítnuta a tamní problémová místa zůstala nevyřešená.")
+        if ignored:
+            where = "na straně" if len(ignored) == 1 else "na stranách"
+            ctx.warn(f"AI vrátila neplatná čtení {where} {_page_list(ignored)} (mimo označená místa, opakovaná nebo "
+                     "v chybném tvaru); ta byla odmítnuta a jejich místa zůstala nevyřešená, ostatní čtení platí.")
 
     def _prepare(self, ctx: StepContext, page: dict, recognised: dict, layout: dict | None,
                  articles: list[dict] | None, spots: list[dict]) -> dict:
@@ -150,10 +164,11 @@ class ReconstructStep(Step):
         return {"data": data, "images": images, "spots": marked, "positions": positions, "words": words,
                 "lines": lines, "inputs": inputs, "ink": ink, "raster": raster}
 
-    def _records(self, prepared: dict, answer, threshold: float, reason: str) -> list[dict]:
-        """One reconstruction record per reading, and one unresolved record per spot no reading covers."""
+    def _records(self, prepared: dict, answer, readings: list[dict], threshold: float, reason: str,
+                 refused: set[str]) -> list[dict]:
+        """One reconstruction record per valid reading, and one unresolved record per spot no valid reading
+        covers (reason "rejected" for the spots of rejected readings)."""
         spots = prepared["spots"]
-        readings = answer.data["readings"] if answer is not None else []
         source = {"provider": answer.provider, "model": answer.model} if answer is not None \
             else {"provider": None, "model": None}
         covered = {word_id for reading in readings for word_id in reading["ids"]}
@@ -173,7 +188,8 @@ class ReconstructStep(Step):
             records.append(record)
         for spot_id in spots:
             if spot_id not in covered:
-                records.append({**self._record(prepared, [spot_id], UNRESOLVED, reason), **source})
+                why = "rejected" if spot_id in refused else reason
+                records.append({**self._record(prepared, [spot_id], UNRESOLVED, why), **source})
         order = prepared["positions"]
         return sorted(records, key=lambda record: order[record["ids"][0]])
 
@@ -189,8 +205,8 @@ class ReconstructStep(Step):
                           "images": sorted({image for word_id in ids
                                             for image in prepared["inputs"].get(word_id, {}).get("images", [])})},
                 "candidate": None, "confidence": None, "reasoning": None, "error": None, "intended": None,
-                "words": [{"id": word_id, "text": MARKER, "bbox": words[word_id]["bbox"],
-                           "hint": words[word_id]["text"]} for word_id in ids]}
+                "words": [{"id": word_id, "text": rules.unresolved_text(spots[word_id], words[word_id]),
+                           "bbox": words[word_id]["bbox"], "hint": words[word_id]["text"]} for word_id in ids]}
 
     @staticmethod
     def _placed(prepared: dict, ids: list[str], texts: list[str]) -> list[dict]:
@@ -217,23 +233,30 @@ class ReconstructStep(Step):
     def report(self, result: StepResult) -> ReportSection:
         """Resolved spots, illegible markers and publisher errors per page and in total; the publisher errors."""
         summary_data = result.read_json(rules.RECONSTRUCT_FILE)
-        pages = [{key: page[key] for key in ("index", "spots", "resolved", "markers", "publisher_errors",
+        pages = [{key: page[key] for key in ("index", "spots", "resolved", "markers", "kept", "publisher_errors",
                                              "rejected")} for page in summary_data["pages"]]
-        errors = []
+        errors, ignored = [], []
         for page in summary_data["pages"]:
             entry = result.read_json(page["file"])
+            if entry.get("ignored"):
+                ignored.append(page["index"] + 1)
             errors += [{"page": page["index"], "ids": record["ids"],
                         "printed": " ".join(record["candidate"]), "intended": record["intended"],
                         "reasoning": record["reasoning"]}
                        for record in entry["reconstructions"] if record["status"] == PUBLISHER_ERROR]
         total = summary_data["total"]
+        kept = total["kept"]
         summary = [f"{total['spots']} problem spots: {total['resolved']} resolved, {total['markers']} illegible "
-                   f"markers, {total['publisher_errors']} publisher errors kept as printed (reconstructions "
-                   f"accepted from confidence {summary_data['threshold']})."]
+                   f"markers, {kept} doubtful reading{'' if kept == 1 else 's'} kept as read (listed for review), "
+                   f"{total['publisher_errors']} publisher errors kept as printed (reconstructions accepted from "
+                   f"confidence {summary_data['threshold']})."]
         rejected = [page for page in pages if page["rejected"]]
         if rejected:
             summary.append("Rejected answers on pages " + ", ".join(str(page["index"] + 1) for page in rejected)
                            + " (see the report JSON).")
+        if ignored:
+            summary.append("Rejected readings (their spots stay unresolved) on pages "
+                           + ", ".join(str(number) for number in ignored) + " (see the page files).")
         if errors:
             summary += ["", "Publisher errors:", ""]
             summary += [f"- page {error['page'] + 1}, {', '.join(error['ids'])}: printed {error['printed']!r}"

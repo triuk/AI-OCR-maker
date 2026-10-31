@@ -6,11 +6,12 @@ itself runs only as part of an export, right before Export: it hands the manual 
 to Export and records what review left open. Its result (`steps/review/`) holds
 
     corrections.json   the manual corrections Export applies (ocrmaker.corrections), as they were then
-    review.json        {"counts": {"markers", "corrected", "remaining", "corrections"},
-                        "markers": [queue items still showing the illegible marker (ocrmaker.review)]}
+    review.json        {"counts": {"markers", "corrected", "remaining", "doubtful", "corrections"},
+                        "markers": [queue items still showing the illegible marker (ocrmaker.review)],
+                        "doubtful": [doubtful readings kept as read that no correction checked]}
 
-Export never waits for the queue to be empty: remaining markers are exported as `[NEČITELNÉ]` and listed in
-the report next to the manual corrections.
+Export never waits for the queue to be empty: remaining markers are exported as `[NEČITELNÉ]`, unchecked
+doubtful readings as read, and both are listed in the report next to the manual corrections.
 """
 from __future__ import annotations
 
@@ -31,7 +32,10 @@ class ReviewStep(Step):
         state = review.queue(ctx, corrections)
         remaining = [item for item in state["items"] if item["correction"] is None]
         ctx.output.write_json(layer.CORRECTIONS_FILE, corrections)
-        ctx.output.write_json(REVIEW_FILE, {"counts": state["counts"], "markers": remaining})
+        ctx.output.write_json(REVIEW_FILE, {
+            "counts": state["counts"],
+            "markers": [item for item in remaining if item["kind"] == review.MARKER_ITEM],
+            "doubtful": [item for item in remaining if item["kind"] == review.DOUBTFUL_ITEM]})
         ctx.record("review", **state["counts"], all_corrections=len(corrections))
 
     def report(self, result: StepResult) -> ReportSection:
@@ -43,7 +47,8 @@ class ReviewStep(Step):
         summary = [f"{len(corrections)} manual corrections ({len(texts)} word texts, {len(notes)} region notes, "
                    f"{len(layer.of_kind(layer.ORDER, corrections))} article orders); "
                    f"{counts['markers']} illegible markers, {counts['corrected']} corrected, "
-                   f"{counts['remaining']} remaining."]
+                   f"{counts['remaining']} remaining; {counts.get('doubtful', 0)} doubtful "
+                   f"reading{'' if counts.get('doubtful', 0) == 1 else 's'} kept as read."]
         if texts:
             summary += ["", "Manual corrections:", ""]
             summary += [f"- page {item['page'] + 1}, {', '.join(item['ids'])}: {item['previous']!r} -> "
@@ -67,9 +72,17 @@ class ReviewStep(Step):
                         f"candidate {item['candidate']!r}" for item in state["markers"][:REPORTED]]
             if len(state["markers"]) > REPORTED:
                 summary.append(f"- and {len(state['markers']) - REPORTED} more (see the report JSON)")
+        doubtful = state.get("doubtful", [])
+        if doubtful:
+            summary += ["", "Doubtful readings kept as read, unchecked:", ""]
+            summary += [f"- page {item['page'] + 1}, {', '.join(item['ids'])}: {item['hint']!r}, "
+                        f"candidate {item['candidate']!r}" for item in doubtful[:REPORTED]]
+            if len(doubtful) > REPORTED:
+                summary.append(f"- and {len(doubtful) - REPORTED} more (see the report JSON)")
+        fields = ("page", "ids", "hint", "candidate", "confidence", "reason", "source", "context")
         data = {"counts": counts, "corrections": corrections, "notes": notes,
-                "markers": [{key: item[key] for key in ("page", "ids", "hint", "candidate", "confidence", "reason",
-                                                        "source", "context")} for item in state["markers"]]}
+                "markers": [{key: item[key] for key in fields} for item in state["markers"]],
+                "doubtful": [{key: item[key] for key in fields} for item in doubtful]}
         return ReportSection("Manual review", data, summary)
 
 

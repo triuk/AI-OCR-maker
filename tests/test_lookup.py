@@ -112,14 +112,14 @@ def test_the_preview_and_the_report_show_the_words_the_web_settled(tmp_path, lan
     assert web["bbox"] == ocr_words(workflow, project)[web["id"]]["bbox"]  # the spot's own box
     assert web["queries"] and web["confidence"] == 90
     assert by_status["unresolved"]["text"] == MARKER and by_status["unresolved"]["queries"]
-    assert overlay["counts"] == {"spots": 2, "searched": 2, "settled": 1, "markers": 1}
+    assert overlay["counts"] == {"spots": 2, "searched": 2, "settled": 1, "markers": 1, "kept": 0}
 
     section = workflow.report(project["id"])["sections"]["lookup"]
-    assert section["total"] == {"spots": 2, "searched": 2, "settled": 1, "markers": 1}
+    assert section["total"] == {"spots": 2, "searched": 2, "settled": 1, "markers": 1, "kept": 0}
     [settled] = section["settled"]
     assert (settled["words"], settled["hint"], settled["sources"]) == (["čtvrtek"], "čtv", [SOURCE])
     summary = workflow.report_summary(project["id"])
-    assert "1 settled by a web source, 1 illegible markers remain" in summary
+    assert "1 settled by a web source, 1 illegible markers and 0 doubtful readings kept as read remain" in summary
     assert "'čtvrtek'" in summary and SOURCE in summary
 
 
@@ -171,3 +171,18 @@ def test_a_web_settled_split_gets_word_boxes_measured_inside_the_joined_box(tmp_
     assert first.x1 <= second.x0  # two words, in order
     for rect in (first, second):
         assert box[0] - 1 <= rect.x0 and rect.x1 <= box[2] + 1
+
+
+def test_a_doubtful_reading_the_web_does_not_settle_keeps_its_printed_text(tmp_path, language_provider):
+    language_provider.on("reconstruction", lambda request: answer_spots({
+        spot_id(request, "zasedáni"): {"text": "zasedání", "confidence": 30}})(request))
+    language_provider.on("lookup", found({}))
+    workflow, project = run(tmp_path, language_provider,
+                            PrintedOcr(readings={word_index("zasedání"): ("zasedáni", 60.0)}))
+
+    assert [text for text, _ in exported(workflow, project)][word_index("zasedání")] == "zasedáni"
+    overlay = workflow.overlay(project["id"], "lookup", 0)
+    [word] = overlay["words"]
+    assert (word["status"], word["text"], word["hint"]) == ("unresolved", "zasedáni", "zasedáni")
+    assert overlay["counts"] == {"spots": 1, "searched": 1, "settled": 0, "markers": 0, "kept": 1}
+    assert "0 illegible markers and 1 doubtful reading kept as read remain" in workflow.report_summary(project["id"])

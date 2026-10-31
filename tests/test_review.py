@@ -94,7 +94,7 @@ def test_a_queue_correction_is_saved_at_once_runs_no_step_and_survives_a_restart
     restarted = Workflow(ProjectStore(tmp_path / "library"), language=language_provider)
     [again] = [entry for entry in restarted.review_queue(project["id"])["items"] if entry["id"] == item["id"]]
     assert again["text"] == "čtvrtek" and again["correction"]["id"] == saved["id"]
-    assert restarted.review_queue(project["id"])["counts"] == {"markers": 2, "corrected": 1, "remaining": 1,
+    assert restarted.review_queue(project["id"])["counts"] == {"markers": 2, "corrected": 1, "remaining": 1, "doubtful": 0,
                                                                "corrections": 1}
 
 
@@ -130,7 +130,7 @@ def test_export_with_remaining_markers_succeeds_and_the_report_lists_markers_and
     assert (states(exported)["review"], states(exported)["export"]) == ("done", "done")
     report = workflow.report(project["id"])
     section = report["sections"]["review"]
-    assert section["counts"] == {"markers": 2, "corrected": 1, "remaining": 1, "corrections": 1}
+    assert section["counts"] == {"markers": 2, "corrected": 1, "remaining": 1, "doubtful": 0, "corrections": 1}
     [correction] = section["corrections"]
     assert (correction["page"], correction["previous"], correction["text"]) == (0, MARKER, "čtvrtek")
     [marker] = section["markers"]
@@ -236,3 +236,30 @@ def test_the_api_explains_in_czech_why_review_or_a_correction_is_refused(api, re
     refused = client.get(f"/api/projects/{fresh['id']}/review/queue")
     assert refused.status_code == 422 and refused.json()["detail"].startswith(
         "Ruční kontrola bude k dispozici po dokončení automatického zpracování (chybí: Import")
+
+
+def test_a_doubtful_reading_kept_as_read_is_listed_for_review_after_the_markers(tmp_path, language_provider):
+    language_provider.on("reconstruction", lambda request: answer_spots({
+        spot_id(request, "opr"): {"text": "opravu", "confidence": 95},
+        spot_id(request, "čtv"): {"text": "čtvrtek", "confidence": 40},
+        spot_id(request, "zasedáni"): {"text": "zasedání", "confidence": 30},
+    })(request))
+    readings = {**DAMAGED, word_index("zasedání"): ("zasedáni", 60.0)}  # clearly read, not in the dictionary
+    workflow = Workflow(ProjectStore(tmp_path / "library"), steps={**implementations(), "ocr": PrintedOcr(readings)},
+                        language=language_provider)
+    project = workflow.run(workflow.create(printed_text_pdf(tmp_path / "zpravodaj.pdf", TEXT))["id"])
+
+    state = workflow.review_queue(project["id"])
+    assert [(item["kind"], item["hint"], item["text"]) for item in state["items"]] == [
+        ("marker", "čtv", MARKER), ("marker", "", MARKER), ("doubtful", "zasedáni", "zasedáni")]
+    assert state["counts"] == {"markers": 2, "corrected": 0, "remaining": 2, "doubtful": 1, "corrections": 0}
+    origins = {word["text"]: word["origin"] for article in workflow.review_page(project["id"], 0)["articles"]
+               for block in article["blocks"] for line in block["lines"] for word in line}
+    assert origins["zasedáni"] == "doubtful" and origins[MARKER] == "marker"
+
+    workflow.export(project["id"])
+    section = workflow.report(project["id"])["sections"]["review"]
+    assert section["counts"]["doubtful"] == 1
+    [kept] = section["doubtful"]
+    assert (kept["page"], kept["hint"]) == (0, "zasedáni")
+    assert "1 doubtful reading kept as read" in workflow.report_summary(project["id"])

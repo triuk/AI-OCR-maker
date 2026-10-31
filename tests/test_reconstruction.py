@@ -115,7 +115,7 @@ DAMAGED = {word_index("opravu"): ("opr", 20.0), word_index("čtvrtek"): ("čtv",
            word_index("kronikářem"): ("", 0.0)}
 
 
-def test_confident_reconstructions_replace_the_spot_and_doubtful_ones_become_the_illegible_marker(
+def test_confident_reconstructions_replace_the_spot_and_less_confident_ones_of_unreadable_words_become_the_marker(
         tmp_path, language_provider):
     language_provider.on("reconstruction", lambda request: answer_spots({
         spot_id(request, "opr"): {"text": "opravu", "confidence": 95},
@@ -166,10 +166,11 @@ def test_only_problem_spots_are_sent_as_targets_and_clearly_recognised_words_nev
         assert text == ("PŘEPSÁNO" if word["id"] in spots else printed)
 
 
-def test_an_answer_touching_an_unmarked_word_is_rejected_and_the_page_keeps_its_markers(
+def test_an_answer_item_touching_an_unmarked_word_is_rejected_and_the_page_keeps_its_valid_items(
         tmp_path, language_provider):
     def wandering(request):
-        answer = answer_spots({spot_id(request, "opr"): {"text": "opravu"}})(request)
+        answer = answer_spots({spot_id(request, "opr"): {"text": "opravu"},
+                               spot_id(request, "čtv"): {"text": "čtvrtek", "confidence": 40}})(request)
         answer["readings"].append({"ids": ["p1-w1"], "words": ["Obecný"], "confidence": 99, "error": "recognition",
                                    "reasoning": "Looks better.", "intended": None})
         return answer
@@ -179,14 +180,44 @@ def test_an_answer_touching_an_unmarked_word_is_rejected_and_the_page_keeps_its_
 
     assert "p1-w1" not in problem_spots(workflow, project)
     reconstruct = next(step for step in project["steps"] if step["id"] == "reconstruct")
-    assert reconstruct["state"] == "warning" and "odmítnuta" in reconstruct["message"]
+    assert reconstruct["state"] == "warning" and "odmítnut" in reconstruct["message"]
     words = [text for text, _ in exported(workflow, project)]
     assert words[0] == "Obecní"
-    damaged = {index: MARKER for index in DAMAGED}
-    assert [words[index] for index in DAMAGED] == list(damaged.values())
+    assert words[word_index("opravu")] == "opravu"  # the page's valid item is kept
+    assert words[word_index("čtvrtek")] == words[word_index("kronikářem")] == MARKER
+    entry = workflow.result(project["id"], "reconstruct").read_json(page_file(0))
+    assert entry["rejected"] is None
+    [ignored] = entry["ignored"]
+    assert ignored["item"]["ids"] == ["p1-w1"] and "not marked" in ignored["problems"][0]
+    assert "Rejected readings (their spots stay unresolved) on pages 1" in workflow.report_summary(project["id"])
+
+
+def test_answer_items_repeating_an_id_are_both_rejected_and_their_spot_stays_unresolved(tmp_path, language_provider):
+    def repeating(request):
+        answer = answer_spots({spot_id(request, "opr"): {"text": "opravu"},
+                               spot_id(request, "čtv"): {"text": "čtvrtek"}})(request)
+        answer["readings"].append({**answer["readings"][1], "words": ["čtvrť"]})
+        return answer
+
+    language_provider.on("reconstruction", repeating)
+    workflow, project = run(tmp_path, language_provider, PrintedOcr(readings=DAMAGED))
+
+    words = [text for text, _ in exported(workflow, project)]
+    assert words[word_index("opravu")] == "opravu"
+    assert words[word_index("čtvrtek")] == MARKER
+    reasons = {word["hint"]: word["reason"] for word in workflow.overlay(project["id"], "reconstruct", 0)["words"]}
+    assert reasons["čtv"] == "rejected" and reasons["opr"] is None
+    entry = workflow.result(project["id"], "reconstruct").read_json(page_file(0))
+    assert len(entry["ignored"]) == 2
+
+
+def test_an_answer_without_a_list_of_readings_is_rejected_as_a_whole(tmp_path, language_provider):
+    language_provider.on("reconstruction", {"answer": "opravu"})
+    workflow, project = run(tmp_path, language_provider, PrintedOcr(readings=DAMAGED))
+
+    assert [text for text, _ in exported(workflow, project)][word_index("opravu")] == MARKER
     overlay = workflow.overlay(project["id"], "reconstruct", 0)
-    assert "p1-w1" in overlay["rejected"]
-    assert {word["reason"] for word in overlay["words"]} == {"rejected"}
+    assert overlay["rejected"] and {word["reason"] for word in overlay["words"]} == {"rejected"}
 
 
 LINE_PIXELS = (PRINTED[0][1][3] - PRINTED[0][1][1]) * 300 / 72  # one printed line in the 300 dpi scan
@@ -320,14 +351,15 @@ def test_the_report_counts_resolved_spots_markers_and_publisher_errors(tmp_path,
     workflow, project = run(tmp_path, language_provider, PrintedOcr(readings=DAMAGED))
 
     section = workflow.report(project["id"])["sections"]["reconstruct"]
-    assert section["total"] == {"spots": 3, "resolved": 1, "markers": 2, "publisher_errors": 0}
-    assert section["pages"] == [{"index": 0, "spots": 3, "resolved": 1, "markers": 2, "publisher_errors": 0,
-                                 "rejected": None}]
-    assert "3 problem spots: 1 resolved, 2 illegible markers, 0 publisher errors" in \
+    assert section["total"] == {"spots": 3, "resolved": 1, "markers": 2, "kept": 0, "publisher_errors": 0}
+    assert section["pages"] == [{"index": 0, "spots": 3, "resolved": 1, "markers": 2, "kept": 0,
+                                 "publisher_errors": 0, "rejected": None}]
+    assert "3 problem spots: 1 resolved, 2 illegible markers, 0 doubtful readings kept as read (listed for " \
+           "review), 0 publisher errors" in \
         workflow.report_summary(project["id"])
 
 
-def test_without_an_ai_provider_every_spot_gets_the_marker_and_the_step_warns(tmp_path):
+def test_without_an_ai_provider_every_unreadable_word_gets_the_marker_and_the_step_warns(tmp_path):
     workflow, project = run(tmp_path, None, PrintedOcr(readings=DAMAGED))
 
     reconstruct = next(step for step in project["steps"] if step["id"] == "reconstruct")
@@ -358,3 +390,39 @@ def test_the_api_serves_the_reconstruction_preview_and_takes_the_acceptance_thre
     listing = {step["id"]: step["preview"] for step in client.get("/api/projects").json()["steps"]}
     assert listing["reconstruct"] is True
     assert "unresolved" in client.get("/previews/reconstruct.js").text
+
+
+DOUBTFUL = {word_index("zasedání"): ("zasedáni", 60.0)}  # clearly read, but not in the dictionary
+
+
+def test_without_an_ai_provider_a_doubtful_reading_keeps_its_printed_text_and_only_unreadable_words_get_the_marker(
+        tmp_path):
+    workflow, project = run(tmp_path, None, PrintedOcr(readings={**DAMAGED, **DOUBTFUL}))
+
+    assert problem_spots(workflow, project)[ocr_id(workflow, project, "zasedáni")]["kind"] == "doubtful"
+    words = [text for text, _ in exported(workflow, project)]
+    assert [words[index] for index in DAMAGED] == [MARKER] * 3
+    assert words[word_index("zasedání")] == "zasedáni"
+    kept = next(word for word in workflow.overlay(project["id"], "reconstruct", 0)["words"]
+                if word["hint"] == "zasedáni")
+    assert (kept["status"], kept["reason"], kept["text"]) == ("unresolved", "unavailable", "zasedáni")
+    section = workflow.report(project["id"])["sections"]["reconstruct"]
+    assert section["total"] == {"spots": 4, "resolved": 0, "markers": 3, "kept": 1, "publisher_errors": 0}
+    assert "4 problem spots: 0 resolved, 3 illegible markers, 1 doubtful reading kept as read" in \
+        workflow.report_summary(project["id"])
+
+
+@pytest.mark.parametrize("outcome", ["low_confidence", "rejected"])
+def test_an_unsettled_doubtful_reading_keeps_its_printed_text(tmp_path, language_provider, outcome):
+    def answer(request):
+        found = answer_spots({spot_id(request, "zasedáni"): {"text": "zasedání", "confidence": 30}})(request)
+        if outcome == "rejected":
+            found["readings"][0]["confidence"] = 300
+        return found
+
+    language_provider.on("reconstruction", answer)
+    workflow, project = run(tmp_path, language_provider, PrintedOcr(readings=DOUBTFUL))
+
+    assert [text for text, _ in exported(workflow, project)][word_index("zasedání")] == "zasedáni"
+    [word] = workflow.overlay(project["id"], "reconstruct", 0)["words"]
+    assert (word["status"], word["reason"], word["text"]) == ("unresolved", outcome, "zasedáni")

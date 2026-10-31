@@ -6,11 +6,14 @@ nothing here runs a step or writes a result. The text is the one Export would wr
 the reconstruction records of every record step (`ocrmaker.transcription`, so Web lookup's records appear
 here as soon as it writes them) and the manual corrections applied, in reading order.
 
-Queue (`queue`): one item per illegible marker, i.e. per reconstruction record in force with status
-"unresolved", page by page in reading order; optionally followed by the accepted reconstructions:
+Queue (`queue`): one item per reconstruction record in force with status "unresolved", page by page in
+reading order: first the illegible markers (unreadable words), then the doubtful readings that kept their
+printed OCR text (ADR 0001; still worth a look, but the export is readable without it); optionally followed
+by the accepted reconstructions:
 
     {"id": "p1-w30",                 # the group's first OCR word id: what `correction` and the crop take
-     "kind": "marker",               # or "reconstruction": an accepted record, listed for a spot check
+     "kind": "marker",               # "doubtful": a doubtful reading kept as read; "reconstruction": an
+                                     # accepted record, listed for a spot check
      "page": 0, "ids": ["p1-w30"],   # 0-based page index; the OCR word ids the marker stands for
      "status": "unresolved", "reason": "low_confidence", "source": "ai",   # from the record
      "text": "[NEČITELNÉ]",          # what the export writes there now (a correction's text once corrected)
@@ -31,7 +34,7 @@ Accepting a suggestion stores an ordinary text correction with source "suggestio
 
 Page view (`page_view`): a page's text in reading order, every written word with the OCR word id a
 correction of it takes (`target`) and where its text comes from (`origin`: "ocr", "ai", "publisher", "web",
-"marker" or "manual"), plus the page's region notes (`notes`, as stored in ocrmaker.corrections).
+"marker", "doubtful" or "manual"), plus the page's region notes (`notes`, as stored in ocrmaker.corrections).
 """
 from __future__ import annotations
 
@@ -48,8 +51,9 @@ from .words import OCR_STEP, read_page
 
 # Written words shown before and after a queue item.
 CONTEXT_WORDS = 12
-# Queue item kinds: an illegible marker, or an accepted reconstruction shown for a spot check.
-MARKER_ITEM, RECONSTRUCTION_ITEM = "marker", "reconstruction"
+# Queue item kinds: an illegible marker, a doubtful reading kept as read, or an accepted reconstruction shown
+# for a spot check.
+MARKER_ITEM, DOUBTFUL_ITEM, RECONSTRUCTION_ITEM = "marker", "doubtful", "reconstruction"
 # Propagation: a partial reading this long counts when the resolved text contains it; a full-length reading
 # counts when it is this similar to the resolved text (difflib ratio, OCR substitutions).
 MIN_PARTIAL = 3
@@ -103,7 +107,7 @@ class Page:
         if record is None:
             return "ocr"
         if record["status"] == UNRESOLVED:
-            return "marker"
+            return MARKER_ITEM if shows_marker(record) else DOUBTFUL_ITEM
         if record.get("source") == "web":
             return "web"
         return "publisher" if record["status"] == PUBLISHER_ERROR else "ai"
@@ -122,18 +126,24 @@ class Page:
         return {"before": " ".join(before[-CONTEXT_WORDS:]), "after": " ".join(after[:CONTEXT_WORDS])}
 
 
+def shows_marker(record: dict) -> bool:
+    """Whether an unresolved record wrote the illegible marker (an unreadable word), not a reading kept as read."""
+    return any(word["text"] == transcription.MARKER for word in record["words"])
+
+
 def page_count(ctx) -> int:
     return len(read_pages(ctx.result(PREPARED_STEP))) if ctx.has_result(PREPARED_STEP) else 0
 
 
 def queue(ctx, corrections: list[dict], reconstructions: bool = False) -> dict:
-    """The review queue: every illegible marker in force (see the module docstring), and its counts.
+    """The review queue: every illegible marker in force, then every doubtful reading kept as read (see the
+    module docstring), and their counts.
 
-    With reconstructions, the accepted reconstructions (every other record in force) follow the markers, page
-    by page in reading order, as items of kind "reconstruction" for a spot check; counts then has
-    "reconstructions" too. Markers and their counts are the same either way.
+    With reconstructions, the accepted reconstructions (every other record in force) follow, page by page in
+    reading order, as items of kind "reconstruction" for a spot check; counts then has "reconstructions" too.
+    Markers, doubtful readings and their counts are the same either way.
     """
-    markers, accepted = [], []
+    markers, kept, accepted = [], [], []
     if ctx.has_result(OCR_STEP):
         order_pages = reading_order(ctx)[0]
         for index in range(page_count(ctx)):
@@ -142,18 +152,20 @@ def queue(ctx, corrections: list[dict], reconstructions: bool = False) -> dict:
             def ordered(found: list[dict]) -> list[dict]:
                 return sorted(found, key=lambda item: min((page.position.get(i, len(page.sequence))
                                                            for i in item["ids"]), default=0))
-            markers += ordered([_item(page, record, MARKER_ITEM) for record in page.records
-                                if record["status"] == UNRESOLVED])
+            unresolved = [record for record in page.records if record["status"] == UNRESOLVED]
+            markers += ordered([_item(page, record, MARKER_ITEM) for record in unresolved if shows_marker(record)])
+            kept += ordered([_item(page, record, DOUBTFUL_ITEM) for record in unresolved
+                             if not shows_marker(record)])
             if reconstructions:
                 accepted += ordered([_item(page, record, RECONSTRUCTION_ITEM) for record in page.records
                                      if record["status"] != UNRESOLVED])
     _suggest(markers)
     corrected = sum(item["correction"] is not None for item in markers)
     counts = {"markers": len(markers), "corrected": corrected, "remaining": len(markers) - corrected,
-              "corrections": len(layer.text_corrections(corrections))}
+              "doubtful": len(kept), "corrections": len(layer.text_corrections(corrections))}
     if reconstructions:
         counts["reconstructions"] = len(accepted)
-    return {"items": markers + accepted, "counts": counts}
+    return {"items": markers + kept + accepted, "counts": counts}
 
 
 def _item(page: Page, record: dict, kind: str) -> dict:

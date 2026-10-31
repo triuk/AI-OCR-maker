@@ -10,31 +10,39 @@ The answer lists readings. A reading covers one or more marked ids and gives the
 word for one id, one word for several ids (the boxes are merged), several words for one id (the box is
 split). It has a confidence (0-100), a short reasoning, and an error kind: "recognition" (local OCR misread
 it; fixed), "publisher" (the print itself is wrong; kept as printed, listed in the report, with the
-"intended" form) or "none" (the local reading was right). An answer that names an id not marked, repeats
-one, or breaks the schema is rejected as a whole (`validate`): the page's spots then stay unresolved.
+"intended" form) or "none" (the local reading was right). A reading that names an id not marked, repeats
+one, joins ids that are not neighbours or breaks the schema is rejected on its own (`validate`): its spots
+stay unresolved, the page's valid readings still count. Only an answer without a list of readings is
+rejected as a whole.
 New word boxes of merges and splits are measured locally on the raster from the gaps between glyphs and the
 words' length ratios (`measure_words`), never taken from the AI.
 
 A reading at or above the setting `reconstruction_accept_confidence` is accepted; below it the spot is
-unresolved and gets the illegible marker for each of its words, with its partial reading as the hint and
-the AI's candidate kept for later steps (Web lookup, Manual review).
+unresolved, as is a spot without an answer (no AI, a rejected item, none given). An unresolved spot never
+loses legible text (ADR 0001, `unresolved_text`): a doubtful reading keeps its printed OCR text, and only an
+unreadable word (or an empty word box) gets the illegible marker. Either way its local reading is kept as the
+hint and the AI's candidate for later steps (Web lookup, Manual review, which lists every unresolved spot).
 
 The AI reconstruction result (`steps/reconstruct/`) holds `reconstruct.json`:
 
     {"threshold": 80.0,
      "pages": [{"index": 0, "file": "pages/page-0001.json", "spots": 3, "resolved": 2, "markers": 1,
-                "publisher_errors": 0, "rejected": null}],
-     "total": {"spots": 3, "resolved": 2, "markers": 1, "publisher_errors": 0}}
+                "kept": 0, "publisher_errors": 0, "rejected": null}],
+     "total": {"spots": 3, "resolved": 2, "markers": 1, "kept": 0, "publisher_errors": 0}}
+
+(markers: unresolved words written as the illegible marker; kept: unresolved doubtful readings kept as read)
 
 and one page file per page, `pages/page-0001.json`, holding the reconstruction records:
 
     {"index": 0,
      "request": {"provider": "claude", "model": "sonnet", "usage": {...} | null} | null,  # null: no request
-     "rejected": null,                 # why the page's answer was rejected (English), else null
+     "rejected": null,                 # why the page's whole answer was rejected (English), else null
+     "ignored": [{"item": {...}, "problems": ["..."]}],  # rejected readings of the answer, with why (English)
      "reconstructions": [{
         "ids": ["p1-w5"],              # the marked OCR word ids it covers, consecutive in one line
         "status": "accepted",          # "accepted", "publisher_error" (kept as printed) or "unresolved"
-        "reason": null,                # unresolved only: "low_confidence", "no_answer", "rejected", "unavailable"
+        "reason": null,                # unresolved only: "low_confidence", "no_answer", "rejected" (the whole
+                                       # answer or the spot's reading), "unavailable"
         "source": "ai",                # who settled it ("ai"; Web lookup writes "web")
         "input": {"spots": [{"id", "kind", "signals", "reading", "confidence"}],  # the problem spots
                   "paragraph": "p1-b2", "text": "... [[p1-w5: Rych4ald]] ...",       # as sent
@@ -47,7 +55,7 @@ and one page file per page, `pages/page-0001.json`, holding the reconstruction r
         "intended": null,              # publisher errors: the form the publisher meant
         "provider": "claude", "model": "sonnet",                                    # null without a request
         "words": [{"id": "p1-w5", "text": "Rychvald", "bbox": [x0, y0, x1, y1],    # what is written in place
-                   "hint": "Rych4ald"}]}]}                                           # of the ids (hint: markers)
+                   "hint": "Rych4ald"}]}]}                                           # of the ids (hint: unresolved)
 
 `ocrmaker.transcription` applies the records to the words every output writes.
 """
@@ -61,6 +69,8 @@ import pymupdf
 
 from . import inkgaps
 from .pages import apply_rect
+from .problems import UNREADABLE
+from .transcription import MARKER
 
 RECONSTRUCT_STEP = "reconstruct"
 RECONSTRUCT_FILE = "reconstruct.json"
@@ -127,6 +137,12 @@ SCHEMA = {
     "required": ["readings"],
     "additionalProperties": False,
 }
+
+
+def unresolved_text(spot: dict, word: dict) -> str:
+    """What an unresolved spot keeps written (ADR 0001): a doubtful reading its printed OCR text, an
+    unreadable word (or an empty word box) the illegible marker."""
+    return MARKER if spot["kind"] == UNREADABLE or not word["text"] else word["text"]
 
 
 def marked(word: dict) -> str:
@@ -232,45 +248,65 @@ def render_crop(ink: inkgaps.InkPage, to_raster, box: list[float], outlined: lis
     return target
 
 
-def validate(answer, spots: dict[str, dict], positions: dict[str, tuple[int, int]]) -> list[str]:
-    """Problems of an answer (English, empty when valid). positions: OCR word id -> (line, place in line)."""
+def validate(answer, spots: dict[str, dict], positions: dict[str, tuple[int, int]]) -> tuple[list[dict], list[dict]]:
+    """The valid readings of an answer and the rejected items, each {"item", "problems"} (English).
+
+    positions: OCR word id -> (line, place in line). A reading is rejected when it names an id not marked,
+    joins ids that are not neighbours in one line, or breaks the schema; every reading naming an id another
+    reading also names is rejected, since the two contradict each other. An answer without a list of readings
+    raises ValueError: it is rejected as a whole.
+    """
     if not isinstance(answer, dict) or not isinstance(answer.get("readings"), list):
-        return ["the answer has no list of readings"]
-    problems, seen = [], set()
-    for number, reading in enumerate(answer["readings"], start=1):
-        if not isinstance(reading, dict):
-            problems.append(f"reading {number} is not an object")
-            continue
-        ids, words = reading.get("ids"), reading.get("words")
-        if not isinstance(ids, list) or not ids or not all(isinstance(word_id, str) for word_id in ids):
-            problems.append(f"reading {number} names no ids")
-            continue
-        unmarked = [word_id for word_id in ids if word_id not in spots]
-        if unmarked:
-            problems.append(f"reading {number} addresses ids that are not marked: {', '.join(unmarked)}")
-        repeated = [word_id for word_id in ids if word_id in seen]
-        if repeated or len(set(ids)) != len(ids):
-            problems.append(f"reading {number} repeats ids: {', '.join(repeated or ids)}")
-        seen.update(ids)
-        if not unmarked:
-            places = sorted(positions[word_id] for word_id in ids)
-            if len({line for line, _ in places}) != 1 or \
-                    [place for _, place in places] != list(range(places[0][1], places[0][1] + len(places))):
-                problems.append(f"reading {number} joins ids that are not neighbours in one line")
-        if not isinstance(words, list) or not words or not all(
-                isinstance(word, str) and word.strip() == word and word and not any(c.isspace() for c in word)
-                for word in words):
-            problems.append(f"reading {number} has no valid words (each one printed word without spaces)")
-        confidence = reading.get("confidence")
-        if isinstance(confidence, bool) or not isinstance(confidence, (int, float)) or not 0 <= confidence <= 100:
-            problems.append(f"reading {number} has an invalid confidence {confidence!r}")
-        if reading.get("error") not in ERRORS:
-            problems.append(f"reading {number} has an unknown error kind {reading.get('error')!r}")
-        intended = reading.get("intended")
-        if intended is not None and not isinstance(intended, str):
-            problems.append(f"reading {number} has an invalid intended form")
-        if not isinstance(reading.get("reasoning"), str):
-            problems.append(f"reading {number} has no reasoning")
+        raise ValueError("the answer has no list of readings")
+    checked = [(reading, _problems(reading, spots, positions)) for reading in answer["readings"]]
+    named: dict[str, int] = {}
+    for reading, problems in checked:
+        if not problems:
+            for word_id in set(reading["ids"]):
+                named[word_id] = named.get(word_id, 0) + 1
+    valid, rejected = [], []
+    for reading, problems in checked:
+        if not problems:
+            repeated = [word_id for word_id in reading["ids"] if named[word_id] > 1]
+            if repeated or len(set(reading["ids"])) != len(reading["ids"]):
+                problems = [f"the reading repeats ids: {', '.join(repeated or reading['ids'])}"]
+        if problems:
+            rejected.append({"item": reading, "problems": problems})
+        else:
+            valid.append(reading)
+    return valid, rejected
+
+
+def _problems(reading, spots: dict[str, dict], positions: dict[str, tuple[int, int]]) -> list[str]:
+    """What is wrong with one reading of an answer (English, empty when valid)."""
+    if not isinstance(reading, dict):
+        return ["the reading is not an object"]
+    ids, words = reading.get("ids"), reading.get("words")
+    if not isinstance(ids, list) or not ids or not all(isinstance(word_id, str) for word_id in ids):
+        return ["the reading names no ids"]
+    problems = []
+    unmarked = [word_id for word_id in ids if word_id not in spots]
+    if unmarked:
+        problems.append(f"the reading addresses ids that are not marked: {', '.join(unmarked)}")
+    else:
+        places = sorted(positions[word_id] for word_id in set(ids))
+        if len({line for line, _ in places}) != 1 or \
+                [place for _, place in places] != list(range(places[0][1], places[0][1] + len(places))):
+            problems.append("the reading joins ids that are not neighbours in one line")
+    if not isinstance(words, list) or not words or not all(
+            isinstance(word, str) and word.strip() == word and word and not any(c.isspace() for c in word)
+            for word in words):
+        problems.append("the reading has no valid words (each one printed word without spaces)")
+    confidence = reading.get("confidence")
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)) or not 0 <= confidence <= 100:
+        problems.append(f"the reading has an invalid confidence {confidence!r}")
+    if reading.get("error") not in ERRORS:
+        problems.append(f"the reading has an unknown error kind {reading.get('error')!r}")
+    intended = reading.get("intended")
+    if intended is not None and not isinstance(intended, str):
+        problems.append("the reading has an invalid intended form")
+    if not isinstance(reading.get("reasoning"), str):
+        problems.append("the reading has no reasoning")
     return problems
 
 
