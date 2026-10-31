@@ -14,6 +14,10 @@ _Avoid_: Job, run, document (as a name for the whole unit)
 The scanned input PDF supplied by the user; the authority on what is printed.
 _Avoid_: Original, raw
 
+**Clean working copy**:
+The project's copy of the source PDF with an earlier OCR's invisible text layer removed and its scan images untouched. Once it exists, every step and the OCR PDF build on it; the source PDF itself never changes.
+_Avoid_: Cleaned source
+
 **OCR PDF**:
 The primary output: the source PDF with its scan images unchanged and an invisible text layer added.
 _Avoid_: Searchable PDF, result
@@ -52,12 +56,18 @@ _Avoid_: Illegible word (illegible is the final state after reconstruction fails
 **Doubtful reading**:
 A problem spot read clearly but implausibly, such as `Rychva1d`; it may be a recognition mistake or a publisher error.
 
+**Empty word box**:
+A word box with no text, added where printed ink lies inside a text line but local OCR recognised no word there; it is always an unreadable word.
+
+**Project dictionary**:
+Words a project accepts as correctly spelled although the language dictionary lacks them, such as local names; a project setting.
+
 **Reconstruction**:
 Determining the printed text of a problem spot from the image, its partial reading, the surrounding text or an external source.
 _Avoid_: Correction (reconstruction never changes legible text)
 
 **Illegible marker**:
-The literal text `[NEČITELNÉ]` written in place of a problem spot that every automatic reconstruction attempt failed to resolve; it is handed to manual review.
+The literal text `[NEČITELNÉ]` written in place of an unreadable word that every automatic reconstruction attempt failed to resolve; it is handed to manual review. An unresolved doubtful reading keeps its printed OCR text instead (ADR 0001) and is listed for manual review after the markers.
 
 ### Workflow
 
@@ -74,6 +84,16 @@ _Avoid_: Visualization, debug view
 **Manual review**:
 The step in which the user resolves remaining illegible markers and checks the automatic result.
 
+**Review queue**:
+The list manual review leads the user through: every illegible marker still in force, with its image crop, surrounding text, partial reading and the AI candidate, then every unresolved doubtful reading kept as read. It can optionally continue through the accepted reconstructions, for spot checks.
+_Avoid_: Todo list, worklist
+
+**Propagation suggestion**:
+The text of an illegible marker the user has resolved, offered for another illegible marker that matches it by partial reading or by context. Accepting it is one action and makes an ordinary manual correction.
+
+**Region note**:
+A note the user attaches to a region dragged on the page during manual review. It is kept with the manual corrections and listed in the report; it changes no text.
+
 **Manual correction**:
-A change the user makes during manual review. It is kept apart from step results and applied when the project is exported, so it never causes earlier steps to run again. Running an earlier step again discards all manual corrections.
+A change the user makes during manual review: a word's text (typed, or an accepted propagation suggestion), a region note, or a page's article order. It is kept apart from step results and applied when the project is exported, so it never causes earlier steps to run again. Running an earlier step again discards all manual corrections.
 _Avoid_: Edit, fix (too generic)

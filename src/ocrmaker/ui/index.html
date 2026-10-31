@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AI-OCR-maker</title>
+  <link rel="stylesheet" href="app.css">
+  <script src="app.js" defer></script>
+  <script src="viewer.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-symbol" aria-hidden="true">Ꭺ</span>
+      <div>AI-OCR-maker<small>OCR naskenovaných dokumentů</small></div>
+      <button id="shutdown" class="icon" title="Vypnout aplikaci" aria-label="Vypnout aplikaci">⏻</button>
+    </div>
+    <button id="newProject" class="primary wide">＋ Nový projekt</button>
+    <div class="sidebar-label"><span>PROJEKTY</span><span id="projectCount">0</span></div>
+    <input id="projectSearch" class="search" type="search" placeholder="Hledat projekt…" aria-label="Hledat projekt">
+    <nav id="projects" class="project-list" aria-label="Projekty"></nav>
+    <div class="sidebar-bottom"><span id="connection" class="connection">Připojuji…</span></div>
+  </aside>
+  <main>
+    <section id="empty" class="empty">
+      <div class="empty-symbol" aria-hidden="true">⎙</div>
+      <h1>Žádný projekt není otevřený</h1>
+      <p>Projekt vznikne ze zdrojového PDF se skeny stránek.<br>Zdrojové PDF zůstane beze změny.</p>
+      <button id="emptyNewProject" class="primary">＋ Nový projekt</button>
+    </section>
+    <section id="workspace" hidden>
+      <header class="project-header">
+        <div>
+          <h1 id="projectName"></h1>
+          <div class="meta"><span id="projectState" class="badge"></span><span id="projectMeta"></span></div>
+        </div>
+        <div class="actions">
+          <button id="diagnosticsButton">Diagnostika</button>
+          <button id="settingsButton">Nastavení</button>
+          <button id="exportButton">Exportovat</button>
+          <button id="stopButton">Zastavit</button>
+          <button id="runButton" class="primary">Spustit</button>
+        </div>
+      </header>
+      <section class="workflow" aria-label="Pracovní postup">
+        <ol id="steps" class="steps"></ol>
+      </section>
+      <div id="projectError" class="notice error" hidden></div>
+      <div id="rerunConfirm" class="notice rerun-confirm" role="alertdialog" aria-label="Potvrzení opakování kroku" hidden></div>
+      <section id="stepPreview" class="step-preview" aria-live="polite"></section>
+    </section>
+  </main>
+
+  <dialog id="newDialog">
+    <form id="newForm" method="dialog">
+      <h2>Nový projekt</h2>
+      <label>Zdrojové PDF<input id="newSource" name="source" type="file" accept="application/pdf,.pdf" required></label>
+      <label>Název projektu<input id="newName" name="name" placeholder="Podle názvu souboru"></label>
+      <label>Jazyk dokumentu<select id="newLanguage" name="language"></select></label>
+      <p class="hint">Aplikace si zdrojové PDF zkopíruje do projektu; původní soubor nikdy nemění.</p>
+      <div class="dialog-actions">
+        <button type="button" data-close>Zrušit</button>
+        <button id="newSubmit" class="primary" type="submit">Vytvořit projekt</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="settingsDialog">
+    <form id="settingsForm" method="dialog">
+      <h2>Nastavení projektu</h2>
+      <label>Jazyk dokumentu<select id="settingsLanguage" name="language"></select></label>
+      <fieldset class="ai-settings">
+        <legend>AI</legend>
+        <div class="field-row">
+          <label>Poskytovatel<select id="settingsProvider" name="ai_provider"></select></label>
+          <label>Model<select id="settingsModel" name="ai_model"></select></label>
+        </div>
+        <p class="hint">Požadavky jdou přes vaše předplatné (claude -p nebo codex exec), nikdy přes API klíč.</p>
+        <div class="ai-check">
+          <button id="checkAi" type="button">Ověřit AI</button>
+          <span id="checkAiResult" class="check-result" role="status"></span>
+        </div>
+      </fieldset>
+      <fieldset class="ai-settings">
+        <legend>Detekce problémů</legend>
+        <div class="field-row">
+          <label>Nečitelné slovo pod důvěrou (%)<input id="settingsUnreadable" type="number" min="0" max="100" step="1"></label>
+          <label>Pochybné čtení pod důvěrou (%)<input id="settingsDoubtful" type="number" min="0" max="100" step="1"></label>
+        </div>
+        <label>Slovník projektu (jedno slovo na řádek)<textarea id="settingsDictionary" rows="4" spellcheck="false"></textarea></label>
+        <p class="hint">Slova ze slovníku projektu se nehlásí jako chybějící ve slovníku. Změna se projeví po novém spuštění kroku.</p>
+      </fieldset>
+      <fieldset class="ai-settings">
+        <legend>AI rekonstrukce</legend>
+        <label>Přijmout rekonstrukci od důvěry AI (%)<input id="settingsReconstruction" type="number" min="0" max="100" step="1"></label>
+        <p class="hint">Při nižší jistotě zůstane místo nevyřešené: nečitelné slovo dostane značku <span data-marker></span>, pochybné čtení zůstane, jak ho přečetlo OCR. Návrh AI zůstane jako nápověda pro ruční kontrolu.</p>
+      </fieldset>
+      <fieldset class="ai-settings">
+        <legend>Dohledání na webu</legend>
+        <label class="check"><input id="settingsWebLookup" type="checkbox"> Dohledávat nevyřešená místa na webu</label>
+        <p class="hint">Krátké cílené dotazy (jména, místa, názvy, čísla) přes webové vyhledávání zvoleného poskytovatele AI. Vypnuté: nevyřešená místa zůstanou, jak jsou (značka <span data-marker></span>, nebo pochybné čtení z OCR).</p>
+      </fieldset>
+      <div class="dialog-actions">
+        <button id="deleteProject" type="button" class="danger push-left">Smazat projekt</button>
+        <button type="button" data-close>Zrušit</button>
+        <button class="primary" type="submit">Uložit</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="diagnosticsDialog" class="wide-dialog">
+    <h2>Diagnostika běhů</h2>
+    <div id="diagnosticsBody" class="diagnostics"></div>
+    <div class="dialog-actions"><button type="button" data-close>Zavřít</button></div>
+  </dialog>
+
+  <div id="toast" role="status" hidden></div>
+</body>
+</html>
