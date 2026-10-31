@@ -33,7 +33,7 @@ from __future__ import annotations
 import statistics
 from collections.abc import Iterator
 
-from .pages import apply_rect, display_matrix, display_size, invert
+from .pages import apply_rect, display_matrix, display_size, invert, union
 
 LAYOUT_STEP = "layout"
 LAYOUT_FILE = "layout.json"
@@ -79,11 +79,6 @@ def block_words(block: dict) -> Iterator[str]:
 
 # Geometry helpers on [x0, y0, x1, y1] lists (display coordinates while building). -----------------------
 
-def _union(boxes) -> list[float]:
-    boxes = list(boxes)
-    return [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)]
-
-
 def _overlap(a0: float, a1: float, b0: float, b1: float) -> float:
     return min(a1, b1) - max(a0, b0)
 
@@ -97,7 +92,7 @@ class _Piece:
 
     def __init__(self, words: list[dict]):
         self.words = words  # each: {"id", "box" (display), "bbox" (source), "x_heights" [display heights]}
-        self.box = _union(word["box"] for word in words)
+        self.box = union(word["box"] for word in words)
         heights = [height for word in words for height in word["x_heights"]]
         # None when the piece has no such letter (digits, capitals): its size is unknown, not small.
         self.size = statistics.median(heights) if heights else None
@@ -119,7 +114,7 @@ class _Block:
     def __init__(self, lines: list[_Piece], kind: str = "body"):
         self.lines = lines
         self.kind = kind
-        self.box = _union(line.box for line in lines)
+        self.box = union(line.box for line in lines)
         self.column = 0
 
     @property
@@ -213,7 +208,7 @@ def _tables(pieces: list[_Piece], body: float, page_width: float) -> list[_Block
                    if any(lined_up(cell, other) for near in run[max(position - 1, 0):position + 2]
                           if near is not row for other in near)]
         used.update(id(piece) for piece in members)
-        area = _union(piece.box for piece in members)
+        area = union(piece.box for piece in members)
         # Longer cells inside the grid belong to it as well.
         for piece in pieces:
             if id(piece) not in used and area[0] <= (piece.box[0] + piece.box[2]) / 2 <= area[2] \
@@ -310,7 +305,7 @@ def _attach_strays(blocks: list[_Block], texts: dict[str, str], body: float) -> 
             continue
         target = min(near, key=lambda block: (block.box[1] > y, distance(block)))
         target.lines = sorted(target.lines + stray.lines, key=lambda line: (line.box[1], line.box[0]))
-        target.box = _union(line.box for line in target.lines)
+        target.box = union(line.box for line in target.lines)
     return kept
 
 
@@ -425,7 +420,7 @@ def build_page(page: dict, recognised: dict) -> dict:
     # footers, spanning headings) get a region of their own band.
     regions: list[list[float]] = []
     for group in column_groups:
-        region = _union(block.box for block in group)
+        region = union(block.box for block in group)
         if region not in regions:
             regions.append(region)
     for block in ordered:
@@ -443,7 +438,7 @@ def build_page(page: dict, recognised: dict) -> dict:
     return {"index": page["index"],
             "columns": [_round(apply_rect(inverse, regions[old])) for old in used],
             "blocks": [{"id": f"p{number}-b{position}", "number": position, "kind": block.kind,
-                        "bbox": _round(_union(word["bbox"] for line in block.lines for word in line.words)),
+                        "bbox": _round(union(word["bbox"] for line in block.lines for word in line.words)),
                         "column": renumber[block.column],
                         "lines": [[word["id"] for word in line.words] for line in block.lines]}
                        for position, block in enumerate(ordered, start=1)]}

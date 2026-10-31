@@ -10,21 +10,17 @@ from __future__ import annotations
 import time
 
 from .. import inkgaps, lookup as rules, reconstruction
-from ..language import INVALID_OUTPUT, MISSING_CLI, UNAVAILABLE, LanguageError
+from ..language import INVALID_OUTPUT, LanguageError, PageRequests, request_fields
 from ..pages import PREPARED_STEP, read_pages
 from ..reconstruction import ACCEPTED, RECONSTRUCT_STEP, UNRESOLVED
 from ..step import ReportSection, Step, StepContext, StepResult
 from ..transcription import MARKER
 from ..words import OCR_STEP, page_file, read_page
+from ..wording import on_pages
 
 THRESHOLD_SETTING = "reconstruction_accept_confidence"
 # Web-settled words listed one by one in the human summary; the report JSON has them all.
 REPORTED_WORDS = 40
-
-
-def _page_list(numbers: list[int]) -> str:
-    shown = ", ".join(str(number) for number in numbers[:10])
-    return shown + (" …" if len(numbers) > 10 else "")
 
 
 def _counts(entry: dict, unresolved: list[dict]) -> dict:
@@ -53,7 +49,7 @@ class LookupStep(Step):
         enabled = bool(ctx.settings.get(rules.ENABLED_SETTING, True))
         threshold = float(ctx.settings.get(THRESHOLD_SETTING, reconstruction.DEFAULT_THRESHOLD))
         summaries, rejected, invalid = [], [], []
-        unavailable: str | None = None
+        ai = PageRequests()
         for page in pages:
             ctx.checkpoint()
             index, number = page["index"], page["index"] + 1
@@ -64,16 +60,8 @@ class LookupStep(Step):
             if unresolved and not enabled:
                 entry["lookups"] = [self._item(record, rules.DISABLED, []) for record in unresolved]
             elif unresolved:
-                if unavailable is None:
-                    try:
-                        self._look_up(ctx, page, reconstructed, unresolved, threshold, entry)
-                    except LanguageError as exc:
-                        if exc.code in (UNAVAILABLE, MISSING_CLI):
-                            unavailable = str(exc)
-                        elif exc.code != INVALID_OUTPUT:
-                            raise
-                        else:
-                            entry["rejected"] = f"{exc.code}: {exc}"
+                _, entry["rejected"] = ai.ask(lambda: self._look_up(ctx, page, reconstructed, unresolved,
+                                                                    threshold, entry))
                 if not entry["lookups"]:
                     outcome = rules.REJECTED if entry["rejected"] else rules.UNAVAILABLE
                     entry["lookups"] = [self._item(record, outcome, rules.queries(record)["queries"])
@@ -86,24 +74,21 @@ class LookupStep(Step):
             summary = {"index": index, "file": page_file(index), **_counts(entry, unresolved),
                        "rejected": entry["rejected"]}
             summaries.append(summary)
-            ctx.record("lookup_page", **summary, provider=(entry["request"] or {}).get("provider"),
-                       model=(entry["request"] or {}).get("model"), usage=(entry["request"] or {}).get("usage"),
+            ctx.record("lookup_page", **summary, **request_fields(entry["request"]),
                        seconds=round(time.monotonic() - started, 3))
         ctx.progress(len(pages), len(pages), f"Stránka {len(pages)} z {len(pages)}")
         total = {key: sum(summary[key] for summary in summaries)
                  for key in ("spots", "searched", "settled", "markers", "kept")}
         ctx.output.write_json(rules.LOOKUP_FILE, {"enabled": enabled, "threshold": threshold, "pages": summaries,
                                                   "total": total})
-        if unavailable is not None:
-            ctx.warn(f"AI není k dispozici ({unavailable}), dohledání na webu proto neproběhlo a nevyřešená "
+        if ai.unavailable is not None:
+            ctx.warn(f"AI není k dispozici ({ai.unavailable}), dohledání na webu proto neproběhlo a nevyřešená "
                      f"místa zůstala, jak jsou (značka {MARKER}, nebo pochybné čtení z OCR).")
         if rejected:
-            where = "na straně" if len(rejected) == 1 else "na stranách"
-            ctx.warn(f"AI vrátila neplatnou odpověď dohledání na webu {where} {_page_list(rejected)}; odpověď byla "
+            ctx.warn(f"AI vrátila neplatnou odpověď dohledání na webu {on_pages(rejected)}; odpověď byla "
                      "odmítnuta a tamní místa zůstala nevyřešená.")
         if invalid:
-            where = "na straně" if len(invalid) == 1 else "na stranách"
-            ctx.warn(f"Některé výsledky dohledání na webu {where} {_page_list(invalid)} byly neplatné (například "
+            ctx.warn(f"Některé výsledky dohledání na webu {on_pages(invalid)} byly neplatné (například "
                      f"příliš dlouhý dotaz nebo chybějící zdroj) a nebyly přijaty.")
 
     def _look_up(self, ctx: StepContext, page: dict, reconstructed: StepResult, unresolved: list[dict],
@@ -126,7 +111,7 @@ class LookupStep(Step):
             data = {"page": page["index"] + 1, "language": ctx.settings.get("language"), "spots": spots}
             answer = ctx.language.ask(rules.INSTRUCTIONS, data, schema=rules.SCHEMA, images=images,
                                       web_search=True, purpose=rules.PURPOSE)
-            entry["request"] = {"provider": answer.provider, "model": answer.model, "usage": answer.usage}
+            entry["request"] = answer.request
             if not isinstance(answer.data, dict) or not isinstance(answer.data.get("lookups"), list):
                 raise LanguageError("Odpověď AI nemá očekávaný tvar.", code=INVALID_OUTPUT)
         listed = {tuple(record["ids"]): record for record in asked}

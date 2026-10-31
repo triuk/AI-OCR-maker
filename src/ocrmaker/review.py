@@ -44,7 +44,7 @@ from pathlib import Path
 
 from . import corrections as layer
 from . import inkgaps, transcription
-from .pages import PREPARED_STEP, apply_rect, read_pages
+from .pages import PREPARED_STEP, apply_rect, read_pages, union
 from .reconstruction import PUBLISHER_ERROR, UNRESOLVED, render_crop
 from .steps.export_step import reading_articles, reading_order
 from .words import OCR_STEP, read_page
@@ -113,7 +113,7 @@ class Page:
         return "publisher" if record["status"] == PUBLISHER_ERROR else "ai"
 
     def box(self, ids: list[str]) -> list[float]:
-        return layer.union(self.ocr[word_id]["bbox"] for word_id in ids)
+        return union(self.ocr[word_id]["bbox"] for word_id in ids)
 
     def context(self, ids: list[str]) -> dict:
         positions = sorted(self.position[word_id] for word_id in ids if word_id in self.position)

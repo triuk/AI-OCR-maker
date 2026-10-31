@@ -41,6 +41,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from .pages import union
+
 TEXT, NOTE, ORDER = "text", "note", "order"
 SOURCES = ("queue", "word", "suggestion")
 # The Review step's result keeps the corrections it handed to Export under this name.
@@ -67,11 +69,6 @@ def ordered(articles: list[dict], corrections: Iterable[dict], page: int) -> lis
         return articles
     rank = {article_id: number for number, article_id in enumerate(orders[-1]["articles"])}
     return sorted(articles, key=lambda article: rank.get(article["id"], len(rank)))
-
-
-def union(boxes: Iterable[list[float]]) -> list[float]:
-    boxes = list(boxes)
-    return [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)]
 
 
 def written_words(ids: list[str], text: str, box: list[float]) -> list[dict]:

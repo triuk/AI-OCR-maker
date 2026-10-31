@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pymupdf
 
+from .wording import named_pages
+
 PAINTED_TEXT = ("fill-text", "stroke-text")
 # Larger than any page, so the removal reaches text placed anywhere, also outside the visible page area.
 EVERYWHERE = pymupdf.Rect(-1e5, -1e5, 1e5, 1e5)
@@ -56,21 +58,15 @@ def _shows_text(page: pymupdf.Page) -> bool:
     return False
 
 
-def page_list(numbers: list[int]) -> str:
-    """Czech "strana 1" / "strany 1, 2, 3 …" for a list of 1-based page numbers."""
-    shown = ", ".join(str(number) for number in numbers[:10])
-    return ("strana " if len(numbers) == 1 else "strany ") + shown + (" …" if len(numbers) > 10 else "")
-
-
 def invisible_message(layer: dict) -> str:
-    return (f"Zdrojové PDF už obsahuje neviditelnou textovou vrstvu ({page_list(layer['pages'])}), nejspíš ze "
+    return (f"Zdrojové PDF už obsahuje neviditelnou textovou vrstvu ({named_pages(layer['pages'])}), nejspíš ze "
             "staršího OCR. Nové OCR by text zdvojilo. Vrstvu lze odstranit a pokračovat; zdrojový soubor "
             "zůstane beze změny.")
 
 
 def visible_message(layer: dict) -> str:
     """Why Import stops for good on visible text."""
-    return (f"Zdrojové PDF obsahuje viditelný text ({page_list(layer['visible_pages'])}). Nejde o sken, ale "
+    return (f"Zdrojové PDF obsahuje viditelný text ({named_pages(layer['visible_pages'])}). Nejde o sken, ale "
             "o digitálně vytvořený dokument, proto se projekt nezpracuje.")
 
 
@@ -79,7 +75,7 @@ def refusal_message(layer: dict | None) -> str:
     if layer is None:
         return "Zdrojové PDF nemá textovou vrstvu, kterou by bylo třeba odstranit."
     return (f"Textovou vrstvu nelze odstranit: zdrojové PDF obsahuje viditelný text "
-            f"({page_list(layer['visible_pages'])}). Nejde o sken, ale o digitálně vytvořený dokument.")
+            f"({named_pages(layer['visible_pages'])}). Nejde o sken, ale o digitálně vytvořený dokument.")
 
 
 def _image_streams(document: pymupdf.Document) -> dict[int, str]:

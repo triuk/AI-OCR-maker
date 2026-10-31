@@ -103,6 +103,44 @@ class Answer:
     usage: dict | None
 
 
+    @property
+    def request(self) -> dict:
+        """Who answered and what it cost, as AI steps store it per page: {"provider", "model", "usage"}."""
+        return {"provider": self.provider, "model": self.model, "usage": self.usage}
+
+
+def request_fields(request: dict | None) -> dict:
+    """A page's stored request (`Answer.request`, or None without one) as diagnostics record fields."""
+    return {key: (request or {}).get(key) for key in ("provider", "model", "usage")}
+
+
+class PageRequests:
+    """The shared rule of an AI step that asks once per page.
+
+    `ask(call)` runs the call unless the AI turned out unavailable on an earlier page. A missing provider or
+    command line tool sets `unavailable` (its Czech message) and no later page asks; an invalid answer is
+    the page's own problem; any other AI failure (usage limit, login, timeout) fails the step.
+    """
+
+    def __init__(self):
+        self.unavailable: str | None = None
+
+    def ask(self, call: Callable[[], object]) -> tuple[object, str | None]:
+        """(what the call returned, or None when it was not asked or failed; why its answer was invalid, else
+        None)."""
+        if self.unavailable is not None:
+            return None, None
+        try:
+            return call(), None
+        except LanguageError as exc:
+            if exc.code in (UNAVAILABLE, MISSING_CLI):
+                self.unavailable = str(exc)
+                return None, None
+            if exc.code != INVALID_OUTPUT:
+                raise
+            return None, f"{exc.code}: {exc}"
+
+
 def normalized_usage(usage) -> dict | None:
     """Usage in the shared shape, or None when it is unknown or inconsistent; never zero for unknown.
 

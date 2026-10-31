@@ -68,7 +68,7 @@ import numpy
 import pymupdf
 
 from . import inkgaps
-from .pages import apply_rect
+from .pages import apply_rect, union
 from .problems import UNREADABLE
 from .transcription import MARKER
 
@@ -216,11 +216,6 @@ def crop_ranges(line_count: int, spot_lines: list[int]) -> tuple[str, list[tuple
     if line_count > 1 and (covered >= DENSE_SHARE * line_count or len(ranges) > MAX_LINE_CROPS):
         return "paragraph", [(0, line_count - 1)]
     return "lines", [(first, last) for first, last in ranges]
-
-
-def union(boxes) -> list[float]:
-    boxes = list(boxes)
-    return [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)]
 
 
 def render_crop(ink: inkgaps.InkPage, to_raster, box: list[float], outlined: list[list[float]],

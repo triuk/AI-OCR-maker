@@ -59,7 +59,7 @@ store its own mapping beside the raster and is out of scope until it exists (ADR
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 
 # The step whose result is the authority on page geometry and the source-view rasters.
 PAGES_STEP = "import"
@@ -87,6 +87,12 @@ def apply_rect(matrix: Matrix, rect: Sequence[float]) -> list[float]:
     corners = [apply(matrix, x, y) for x, y in ((x0, y0), (x1, y0), (x0, y1), (x1, y1))]
     xs, ys = [p[0] for p in corners], [p[1] for p in corners]
     return [min(xs), min(ys), max(xs), max(ys)]
+
+
+def union(boxes: Iterable[Sequence[float]]) -> list[float]:
+    """The smallest box [x0, y0, x1, y1] holding all the given boxes (one or more)."""
+    boxes = list(boxes)
+    return [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)]
 
 
 def multiply(first: Matrix, then: Matrix) -> list[float]:

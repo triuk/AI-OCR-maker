@@ -13,14 +13,10 @@ from .. import existing_text, pdf
 from ..errors import StepError
 from ..pages import PAGES_FILE, apply_rect, raster_name, read_pages
 from ..step import Step, StepContext, StepResult
+from ..wording import on_pages, page_numbers
 
 # Below this scan resolution recognition gets unreliable; the user is warned, the run continues.
 LOW_DPI = 150
-
-
-def _page_list(numbers: list[int]) -> str:
-    shown = ", ".join(str(number) for number in numbers[:10])
-    return shown + (" …" if len(numbers) > 10 else "")
 
 
 class ImportStep(Step):
@@ -63,12 +59,11 @@ class ImportStep(Step):
         ctx.record("import", pages=total, outcome="imported", page_details=records)
         resampled = [page["index"] + 1 for page in pages if not page["raster"]["native"]]
         if low:
-            where = "na straně" if len(low) == 1 else "na stranách"
-            ctx.warn(f"Sken má nízké rozlišení (pod {LOW_DPI} dpi) {where} {_page_list(low)}; "
+            ctx.warn(f"Sken má nízké rozlišení (pod {LOW_DPI} dpi) {on_pages(low)}; "
                      "rozpoznávání textu může být nepřesné.")
         if resampled:
             which = "Strana {} nemá" if len(resampled) == 1 else "Strany {} nemají"
-            ctx.warn(which.format(_page_list(resampled)) + " sken v použitelném rozlišení; "
+            ctx.warn(which.format(page_numbers(resampled)) + " sken v použitelném rozlišení; "
                      "pracovní obraz se vykreslil v náhradním rozlišení.")
 
     def overlay(self, result: StepResult, page: int) -> dict | None:

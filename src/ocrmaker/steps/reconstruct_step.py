@@ -12,23 +12,19 @@ from __future__ import annotations
 import time
 
 from .. import inkgaps, reconstruction as rules
-from ..language import INVALID_OUTPUT, MISSING_CLI, UNAVAILABLE, LanguageError
+from ..language import PageRequests, request_fields
 from ..layout import LAYOUT_STEP, read_layout_page
-from ..pages import PREPARED_STEP, apply_rect, read_pages
+from ..pages import PREPARED_STEP, apply_rect, read_pages, union
 from ..reading_order import ORDER_FILE, ORDER_STEP
 from ..reconstruction import ACCEPTED, PUBLISHER_ERROR, UNRESOLVED
 from ..step import ReportSection, Step, StepContext, StepResult
 from ..transcription import MARKER
 from ..words import OCR_STEP, page_file, read_page
+from ..wording import on_pages
 
 PROBLEMS_STEP = "problems"
 CROPS = "crops"
 THRESHOLD_SETTING = "reconstruction_accept_confidence"
-
-
-def _page_list(numbers: list[int]) -> str:
-    shown = ", ".join(str(number) for number in numbers[:10])
-    return shown + (" …" if len(numbers) > 10 else "")
 
 
 def _counts(records: list[dict]) -> dict:
@@ -50,7 +46,7 @@ class ReconstructStep(Step):
         order_pages = {item["index"]: item for item in order["pages"]}
         threshold = float(ctx.settings.get(THRESHOLD_SETTING, rules.DEFAULT_THRESHOLD))
         summaries, rejected, ignored = [], [], []
-        unavailable: str | None = None
+        ai = PageRequests()
         for page in pages:
             ctx.checkpoint()
             index, number = page["index"], page["index"] + 1
@@ -63,20 +59,12 @@ class ReconstructStep(Step):
                 layout = read_layout_page(layout_result, index) if layout_result else None
                 articles = (order_pages.get(index) or {}).get("articles")
                 prepared = self._prepare(ctx, page, recognised, layout, articles, spots)
-                answer, readings = None, []
-                if unavailable is None:
-                    try:
-                        answer = ctx.language.ask(rules.INSTRUCTIONS, prepared["data"], schema=rules.SCHEMA,
-                                                  images=prepared["images"], purpose=rules.PURPOSE)
-                    except LanguageError as exc:
-                        if exc.code in (UNAVAILABLE, MISSING_CLI):
-                            unavailable = str(exc)
-                        elif exc.code != INVALID_OUTPUT:
-                            raise
-                        else:
-                            entry["rejected"] = f"{exc.code}: {exc}"
+                readings = []
+                answer, entry["rejected"] = ai.ask(lambda: ctx.language.ask(
+                    rules.INSTRUCTIONS, prepared["data"], schema=rules.SCHEMA, images=prepared["images"],
+                    purpose=rules.PURPOSE))
                 if answer is not None:
-                    entry["request"] = {"provider": answer.provider, "model": answer.model, "usage": answer.usage}
+                    entry["request"] = answer.request
                     try:
                         readings, entry["ignored"] = rules.validate(answer.data, prepared["spots"],
                                                                     prepared["positions"])
@@ -87,7 +75,7 @@ class ReconstructStep(Step):
                     rejected.append(number)
                 if entry["ignored"]:
                     ignored.append(number)
-                reason = "rejected" if entry["rejected"] else "unavailable" if unavailable else "no_answer"
+                reason = "rejected" if entry["rejected"] else "unavailable" if ai.unavailable else "no_answer"
                 refused = {word_id for item in entry["ignored"] if isinstance(item["item"], dict)
                            and isinstance(item["item"].get("ids"), list) for word_id in item["item"]["ids"]
                            if isinstance(word_id, str)}
@@ -96,24 +84,21 @@ class ReconstructStep(Step):
             counts = _counts(entry["reconstructions"])
             summary = {"index": index, "file": page_file(index), **counts, "rejected": entry["rejected"]}
             summaries.append(summary)
-            ctx.record("reconstruction_page", **summary, provider=(entry["request"] or {}).get("provider"),
-                       model=(entry["request"] or {}).get("model"), usage=(entry["request"] or {}).get("usage"),
+            ctx.record("reconstruction_page", **summary, **request_fields(entry["request"]),
                        seconds=round(time.monotonic() - started, 3))
         ctx.progress(len(pages), len(pages), f"Stránka {len(pages)} z {len(pages)}")
         total = {key: sum(summary[key] for summary in summaries)
                  for key in ("spots", "resolved", "markers", "kept", "publisher_errors")}
         ctx.output.write_json(rules.RECONSTRUCT_FILE, {"threshold": threshold, "pages": summaries, "total": total})
-        if unavailable is not None:
-            ctx.warn(f"AI není k dispozici ({unavailable}), problémová místa proto zůstala nevyřešená: nečitelná "
+        if ai.unavailable is not None:
+            ctx.warn(f"AI není k dispozici ({ai.unavailable}), problémová místa proto zůstala nevyřešená: nečitelná "
                      f"slova dostala značku {MARKER}, pochybná čtení si ponechala text z OCR; obojí čeká na ruční "
                      "kontrolu.")
         if rejected:
-            where = "na straně" if len(rejected) == 1 else "na stranách"
-            ctx.warn(f"AI vrátila neplatnou rekonstrukci {where} {_page_list(rejected)} (odpověď v chybném tvaru); "
+            ctx.warn(f"AI vrátila neplatnou rekonstrukci {on_pages(rejected)} (odpověď v chybném tvaru); "
                      "odpověď byla odmítnuta a tamní problémová místa zůstala nevyřešená.")
         if ignored:
-            where = "na straně" if len(ignored) == 1 else "na stranách"
-            ctx.warn(f"AI vrátila neplatná čtení {where} {_page_list(ignored)} (mimo označená místa, opakovaná nebo "
+            ctx.warn(f"AI vrátila neplatná čtení {on_pages(ignored)} (mimo označená místa, opakovaná nebo "
                      "v chybném tvaru); ta byla odmítnuta a jejich místa zůstala nevyřešená, ostatní čtení platí.")
 
     def _prepare(self, ctx: StepContext, page: dict, recognised: dict, layout: dict | None,
@@ -135,7 +120,7 @@ class ReconstructStep(Step):
             crops = []
             for first, last in ranges:
                 chosen = [word for line in paragraph["lines"][first:last + 1] for word in line if word in words]
-                box = rules.union(words[word]["bbox"] for word in chosen)
+                box = union(words[word]["bbox"] for word in chosen)
                 height = max(pixels[3] - pixels[1] for word in chosen
                              for pixels in [apply_rect(raster["to_raster"], words[word]["bbox"])])
                 shown = [word for word in chosen if word in marked]

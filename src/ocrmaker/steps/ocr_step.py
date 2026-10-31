@@ -16,11 +16,7 @@ from ..errors import StepError
 from ..pages import PREPARED_STEP, read_pages
 from ..step import ReportSection, Step, StepContext, StepResult
 from ..words import OCR_FILE, page_file, page_words, read_page
-
-
-def _page_list(numbers: list[int]) -> str:
-    shown = ", ".join(str(number) for number in numbers[:10])
-    return shown + (" …" if len(numbers) > 10 else "")
+from ..wording import on_pages
 
 
 # A line read again in an edge band is kept when its words reach this mean confidence and hold a letter or
@@ -91,8 +87,7 @@ class OcrStep(Step):
                        "model": f"tessdata_best {tessdata.COMMIT[:12]}"},
             "pages": summaries})
         if empty:
-            where = "na straně" if len(empty) == 1 else "na stranách"
-            ctx.warn(f"Lokální OCR nerozpoznalo žádné slovo {where} {_page_list(empty)}.")
+            ctx.warn(f"Lokální OCR nerozpoznalo žádné slovo {on_pages(empty)}.")
 
     def overlay(self, result: StepResult, page: int) -> dict | None:
         """Word boxes with text and confidence, in source page coordinates."""
