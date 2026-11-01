@@ -5,5 +5,8 @@
   {"page": 3, "bbox": [349.02, 137.88, 403.74, 147.24], "text": "vitamínových", "note": "the print has í; the reference wrote i"},
   {"page": 6, "bbox": [170.1, 341.28, 196.92, 350.1], "text": "Žídková", "note": "the print has í; the reference wrote i"},
   {"page": 6, "bbox": [171.18, 354.06, 202.86, 361.26], "text": "Kulíšková", "note": "the print has í; the reference wrote i"},
-  {"page": 6, "bbox": [594.9, 300.24, 610.02, 307.98], "text": "1908", "note": "the print reads 1908; the reference wrote 1900"}
+  {"page": 6, "bbox": [594.9, 300.24, 610.02, 307.98], "text": "1908", "note": "the print reads 1908; the reference wrote 1900"},
+  {"page": 3, "bbox": [15.84, 183.78, 38.52, 193.32], "text": "nový", "note": "the print reads nový (binding shadow smears the n); the reference wrote mový"},
+  {"page": 3, "bbox": [28.26, 421.74, 59.94, 430.74], "text": "nátkem)", "note": "the print reads (rov-nátkem); the reference wrote nátky)"},
+  {"page": 4, "bbox": [552.42, 618.84, 580.5, 626.58], "text": "Církvi", "note": "the print has a plain i at the end; the reference wrote Církví"}
 ]
