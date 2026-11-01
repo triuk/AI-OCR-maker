@@ -1,9 +1,10 @@
-"""Seam 1 and 2: empty word boxes for ink Local OCR missed, and Problem detection with local signals only."""
+"""Seam 1 and 2: empty word boxes for ink Local OCR missed, and Problem detection with local signals and the AI
+read-through of the page text."""
 from __future__ import annotations
 
 import pytest
 
-from fakes import run_and_export
+from fakes import default_provider, run_and_export
 from ocrmaker.step import Step
 from ocrmaker.steps import implementations
 from ocrmaker.store import ProjectStore
@@ -141,9 +142,10 @@ class ScriptedOcr(Step):
         ctx.output.write_json("ocr.json", {"engine": {"name": "scripted"}, "pages": []})
 
 
-def scripted(tmp_path, pages, **settings):
+def scripted(tmp_path, pages, language=None, **settings):
     """A workflow whose Local OCR reads the scripted pages, and its project after a run."""
-    workflow = Workflow(ProjectStore(tmp_path / "library"), steps={**implementations(), "ocr": ScriptedOcr(pages)})
+    workflow = Workflow(ProjectStore(tmp_path / "library"), steps={**implementations(), "ocr": ScriptedOcr(pages)},
+                        language=language)
     project = workflow.create(scan_pdf(tmp_path / "zpravodaj.pdf", pages=len(pages)), settings=settings or None)
     return workflow, workflow.run(project["id"])
 
@@ -282,3 +284,65 @@ def test_the_api_serves_the_problem_preview_and_takes_threshold_and_dictionary_s
     listing = {step["id"]: step["preview"] for step in client.get("/api/projects").json()["steps"]}
     assert listing["problems"] is True
     assert "unreadable" in client.get("/previews/problems.js").text
+
+
+PROOFREAD = [[("Zasedání", 96.0), ("se", 96.0), ("konalo", 95.0), ("8do", 94.0), ("května.", 95.0)],
+             [("Paní", 96.0), ("čárka", 95.0), ("Nováková", 95.0), ("je", 96.0), ("místo", 96.0), ("starosty.", 95.0)],
+             [("Obec", 96.0), ("Rych4ald", 95.0), ("schválila", 95.0), ("rozpočet.", 96.0)]]
+
+
+def lines_of(request) -> dict[str, int]:
+    """The read-through request's numbered lines: text -> line number."""
+    found = {}
+    for article in request.data["articles"]:
+        for line in article["text"].splitlines():
+            number, text = line.split("| ", 1)
+            found[text] = int(number)
+    return found
+
+
+def naming(*items):
+    """A scripted read-through answer naming (word, reason) items on the line that holds the word."""
+    def answer(request):
+        lines = lines_of(request)
+        return {"words": [{"line": next((number for text, number in lines.items() if word in text), 99),
+                           "word": word, "reason": reason} for word, reason in items]}
+    return answer
+
+
+def test_the_ai_read_through_flags_words_that_do_not_fit_their_sentence_with_its_reason(tmp_path):
+    provider = default_provider().on("readthrough", naming(
+        ("čárka", "Jméno, nejspíš Šárka."), ("místo starosty", "Nejspíš místostarosty."),
+        ("8do", "Chybí mezera: 8 do."), ("Rych4ald", "Rychvald."), ("Nováček", "Not in the text.")))
+    workflow, project = scripted(tmp_path, [PROOFREAD], language=provider)
+    spots = flagged(workflow, project)
+
+    request = provider.requests_for("readthrough")[0]
+    assert "Zasedání se konalo 8do května." in lines_of(request) and not request.images
+    assert spots["čárka"]["kind"] == "doubtful" and spots["čárka"]["signals"] == ["context"]
+    assert spots["čárka"]["note"] == "Jméno, nejspíš Šárka."
+    assert spots["místo"]["note"] == spots["starosty."]["note"] == "Nejspíš místostarosty."
+    assert spots["8do"]["signals"][-1] == "context" and spots["Rych4ald"]["signals"][-1] == "context"
+    assert "Nováková" not in spots and "konalo" not in spots
+    page = workflow.result(project["id"], "problems").read_json(page_file(0))
+    assert [item["item"]["word"] for item in page["readthrough"]["ignored"]] == ["Nováček"]
+    assert [spot["text"] for spot in page["spots"]] == ["8do", "čárka", "místo", "starosty.", "Rych4ald"]
+
+
+def test_ai_reconstruction_reads_a_context_spot_in_the_print_with_the_read_through_reason(tmp_path):
+    provider = default_provider().on("readthrough", naming(("čárka", "Jméno, nejspíš Šárka.")))
+    workflow, project = scripted(tmp_path, [PROOFREAD], language=provider)
+
+    request = provider.requests_for("reconstruction")[0]
+    spot = next(spot for spot in request.data["spots"] if spot["reading"] == "čárka")
+    assert spot["signals"] == ["context"] and spot["note"] == "Jméno, nejspíš Šárka."
+    assert "signal context" in request.instructions and request.images
+
+
+def test_an_invalid_read_through_answer_leaves_the_local_spots_with_a_warning(tmp_path):
+    provider = default_provider().on("readthrough", {"names": []})
+    workflow, project = scripted(tmp_path, [PROOFREAD], language=provider)
+
+    assert set(flagged(workflow, project)) == {"Rych4ald"}
+    problems = next(step for step in project["steps"] if step["id"] == "problems")
+    assert problems["state"] == "warning" and "kontrolu smyslu textu" in problems["message"]

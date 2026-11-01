@@ -117,6 +117,9 @@ rest on the next line. Give only the part on the spot's line, never the whole wo
 even where the scan cut the line end off: for "ko" at a line end and "panou" on the next line, give "ko-". \
 A spot with the signal joins_next_line is such a line end read without its hyphen; if the print shows two \
 separate words there, give the word as printed.
+- A spot with the signal context was read clearly, but a proofreading of the text found that it does not \
+fit its sentence; its note says why. That is a reason to look closely, not evidence: read the print, and \
+when it shows the local reading, give it unchanged with error "none" (or "publisher" for a misprint).
 - Usually one id is one word. If the local OCR split one printed word into several marked boxes, give one \
 reading with all of those ids (consecutive in one line) and one word. If one marked box holds several \
 printed words, give one reading with that id and the words in order.

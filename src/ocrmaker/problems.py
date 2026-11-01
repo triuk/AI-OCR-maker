@@ -15,6 +15,10 @@ word of a page file (ocrmaker.words) is checked for these signals:
     joins_next_line         a line's last word, read without a hyphen, that forms a dictionary word with the next
                             line's first word: the line-end hyphen was lost (cut off by the scan, say)
 
+Problem detection adds one signal from the AI read-through of the page text (ocrmaker.readthrough):
+
+    context                 the word does not fit its sentence (a confident misreading that is a real word)
+
 and classified as one kind:
 
     unreadable  (unreadable word)    empty, partial_text, adjoins_empty, or confidence below the

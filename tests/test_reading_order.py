@@ -60,7 +60,7 @@ def similarity(words, expected) -> float:
 def crossing(tmp_path_factory):
     """One recognised two-column page with two crossing articles; tests rerun Reading order with own answers."""
     directory = tmp_path_factory.mktemp("crossing")
-    provider = ScriptedProvider()
+    provider = ScriptedProvider().on("readthrough", {"words": []})
     provider.on("reading_order", lambda request: {"articles": [
         article(*(numbers_by_key(request, CROSSING)[key] for key in CROSSING_READING))]})
     workflow = Workflow(ProjectStore(directory / "library"), language=provider)
@@ -208,7 +208,7 @@ def rules_run(tmp_path_factory):
     The scripted AI deliberately answers out of order; the rules put each group where it belongs.
     """
     directory = tmp_path_factory.mktemp("rules")
-    provider = ScriptedProvider()
+    provider = ScriptedProvider().on("readthrough", {"words": []})
 
     def answer(request):
         page = request.data["page"]

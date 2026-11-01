@@ -147,7 +147,8 @@ class ReconstructStep(Step):
                                         "images": [crop["file"] for crop in crops if word in crop["spots"]]}
         data_spots = [{"id": spot_id, "kind": spot["kind"], "signals": spot["signals"], "reading": spot["text"],
                        "confidence": spot["confidence"], "paragraph": inputs[spot_id]["paragraph"],
-                       "line": inputs[spot_id]["line"]} for spot_id, spot in marked.items()]
+                       "line": inputs[spot_id]["line"]} | ({"note": spot["note"]} if spot.get("note") else {})
+                      for spot_id, spot in marked.items()]
         data = {"page": index + 1, "language": ctx.settings.get("language"), "paragraphs": paragraphs,
                 "spots": data_spots}
         return {"data": data, "images": images, "spots": marked, "positions": positions, "breaks": breaks,

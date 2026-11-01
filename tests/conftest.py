@@ -37,8 +37,9 @@ def step_implementations():
 def language_provider():
     """The AI stand-in for every provider name; script answers with language_provider.on(purpose, answer).
 
-    Reading order answers by default with Layout's geometric numbering, as one article; AI reconstruction
-    confirms every problem spot's own reading and leaves empty word boxes unanswered (fakes.answer_spots).
+    Reading order answers by default with Layout's geometric numbering, as one article; the read-through names
+    no word; AI reconstruction confirms every problem spot's own reading and leaves empty word boxes unanswered
+    (fakes.answer_spots).
     """
     return default_provider()
 

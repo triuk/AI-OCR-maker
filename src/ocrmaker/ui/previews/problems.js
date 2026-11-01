@@ -18,6 +18,7 @@
     mixed_case: "smíšená velká a malá písmena",
     odd_symbols: "neobvyklé znaky",
     joins_next_line: "pokračuje na dalším řádku bez spojovníku",
+    context: "nedává smysl ve větě",
   };
   const percent = value => `${Math.round(value)} %`;
 
@@ -32,7 +33,7 @@
     for (const spot of overlay.spots) {
       const kind = KINDS[spot.kind];
       const reading = spot.text ? `„${spot.text}“` : "(bez textu)";
-      const why = spot.signals.map(signal => SIGNALS[signal] || signal).join(", ");
+      const why = spot.signals.map(signal => SIGNALS[signal] || signal).join(", ") + (spot.note ? ` (${spot.note})` : "");
       box(spot.bbox, {class: `problem-spot ${kind.cls}`,
                       "data-tip": `${kind.label}: ${reading}\nDůvěra: ${percent(spot.confidence)}\n${why}\n${spot.id}`}, layer);
     }

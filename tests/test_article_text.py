@@ -138,7 +138,7 @@ def markdown(workflow, project) -> str:
 @pytest.fixture(scope="module")
 def exported(tmp_path_factory):
     directory = tmp_path_factory.mktemp("article-text")
-    provider = ScriptedProvider().on("reading_order", reading_order)
+    provider = ScriptedProvider().on("reading_order", reading_order).on("readthrough", {"words": []})
     workflow = Workflow(ProjectStore(directory / "library"), language=provider)
     project = run_and_export(workflow, workflow.create(printed_pdf(directory / "zpravodaj-2000-05.pdf", PAGES))["id"])
     return workflow, project, markdown(workflow, project)
@@ -239,7 +239,7 @@ UNCLEAR = [
 
 def test_unclear_hyphens_are_decided_by_the_dictionary_and_the_documents_own_words(tmp_path):
     provider = ScriptedProvider().on("reading_order", lambda request: {"articles": [
-        article(*(block["number"] for block in request.data["blocks"]))]})
+        article(*(block["number"] for block in request.data["blocks"]))]}).on("readthrough", {"words": []})
     steps = implementations() | {"export": DictionaryExport(["sever", "jih", "zasedání"])}
     workflow = Workflow(ProjectStore(tmp_path / "library"), steps=steps, language=provider)
     project = run_and_export(
