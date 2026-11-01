@@ -9,22 +9,29 @@ The latest kept trial of each configuration; every round compares against these.
 
 | Configuration | Trial | correct % | silent | geometry | order | review | unnecessary |
 |---|---|---|---|---|---|---|---|
-| claude haiku high | 20261101T193734 | 92.95 | 103 | 263 | 61/912w | 295 | 5 |
-| codex gpt-6-luna high | 20261101T200337 | 92.93 | 159 | 253 | 55/1320w | 192 | 2 |
+| claude haiku high | 20261101T213809 | 92.93 | 98 | 266 | 59/489w | 284 | 9 |
+| codex gpt-6-luna high | 20261101T221354 | 93.02 | 139 | 260 | 53/1070w | 210 | 5 |
 
-Scored with corrections digest of 10 reference corrections (2026-11-01). AI time: haiku 1538 s, luna 603 s;
-about 0.9-1 M tokens each. Kept changes since the last check configurations: 1.
+Scored with corrections digest of 10 reference corrections (2026-11-01). AI time: haiku 1420 s, luna 553 s;
+about 1 M tokens each. Kept changes since the last check configurations: 2 (the next kept change also runs
+`claude sonnet medium` and `codex gpt-6.1-terra medium`).
+
+Noise: with identical problem spots, the pages a change does not touch still swing by up to ~25 silent in
+luna (108, 100, 131, 106 over four trials) and ~6 in haiku. Judge a change on the pages it touches (compare
+the spots files) and rerun luna when its total moves against the touched pages.
 
 ## Open ideas
 
 Silent errors by cause (diagnosis of 2026-11-01 on the haiku baseline, 150 silent; the local causes are the
-same in luna). Done: text Tesseract never found (grey box p1, headline p2, "2000" p1), see the round below.
+same in luna). Done: text Tesseract never found (grey box p1, headline p2, "2000" p1); line-end hyphens cut
+off at p4's right edge (rounds below).
 
-1. Line-end hyphens cut off at the right edge of p4 (18 silent, both configs): Tesseract reads "tě", "při",
-   "do" (dictionary words, never flagged); the AI confirms the visible "ko" even when it says the word is
-   "kopanou". Step: problems. Idea: in `problems.py` next to `_dictionary_verdicts`, flag the last word of a
-   line without a hyphen when joining it with the next line's first word gives a dictionary word and that
-   first word alone is not one.
+1. Rest of the cut line ends on p4 (about 5 silent per config): "místo"/"starosty" and "spolu"/"pracuje" are
+   words on both sides, so `_lost_hyphens` leaves them (only the print tells); luna writes a whole word into
+   the head's single box ("zů" -> "základní", "trvů" -> "trvání", which `split_line_break` does not see as it
+   names one id); a misread continuation ("vidclně") cannot be split. Idea: split a one-id reading of a
+   line-end spot too when the word ends with the continuation's reading and the head box is far too narrow
+   for the whole word. Step: reconstruct.
 2. Lost narrow spaces with digits ("19.2.", "8do", "92let"; 19 + 3 silent): `_known` skips anything with a
    digit and `_UNIT` takes "8do", "92let" for a number with a unit. Step: problems.
 3. Confident wrong Tesseract readings (35 silent: čárka/Šárka, květnu, "135", "6.2.2000", dot vs comma):
@@ -63,6 +70,29 @@ Trials: before → after per configuration, with trial ids.
 Decision: why kept or not; reference corrections added.
 Next: what the numbers suggest.
 -->
+
+### 2026-11-01 cut-line-end-hyphens (branch optimize/2026-11-01-cut-line-end-hyphens, kept)
+Hypothesis: the scan cuts p4's right column edge, so line-end hyphens are missing from the image; Tesseract's
+dictionary-word heads ("při", "do") are never flagged and luna confirms flagged fragments ("ko") without the
+hyphen; flagging line ends that join with the next line and telling the AI to restore the hyphen removes
+them (problems + reconstruct), silent about -4 haiku, -15 luna.
+Change: problems signal `joins_next_line` (doubtful): a line's last word without a hyphen or closing
+punctuation, letters only, that forms a dictionary word with the next line's trusted lower-case first word,
+one of the two being no word alone ("do" + "opravených" stays unflagged). The prompt says a broken word is
+answered as the part on the spot's line ending with "-", even where the scan cut it off. Luna then answered
+6 such words whole over both ids, which was rejected and sent both halves to review (unnecessary 2 -> 6);
+`reconstruction.split_line_break` now splits such a reading at the line break when the word ends with the
+continuation's local reading.
+Trials (b12938c, then 6c975f5 with the split): haiku 20261101T193734 -> 20261101T205623 / 20261101T213809:
+silent 103 -> 103 / 98 (p4 15 -> 10 / 11), geometry 263 -> 244 / 266, order 61/912w -> 60/638w / 59/489w,
+review 295 -> 275 / 284, unnecessary 5 -> 11 / 9. luna 20261101T200337 -> 20261101T212259 /
+20261101T220215 / 20261101T221354: silent 159 -> 142 / 164 / 139 (p4 31 -> 22 / 13 / 13, lost hyphens
+26 -> 5), geometry 253 -> 232 / 245 / 260, order 55/1320w -> 56/1339w / 52/1313w / 53/1070w, review
+192 -> 186 / 164 / 210, unnecessary 2 -> 6 / 3 / 5.
+Decision: kept. Problem spots are identical to the baseline on every page but p4, and p4's silent errors
+fell in all five trials; luna 20261101T220215 (131 silent off p4, mostly p6 dates losing their spaces) was
+noise, its rerun is back at 106. Geometry and unnecessary move within noise. No reference corrections.
+Next: idea 2 (lost narrow spaces with digits); luna's p6 dates ("11.2.2000" for "11. 2. 2000") belong to it.
 
 ### 2026-11-01 dropped-regions (branch optimize/2026-11-01-dropped-regions, kept)
 Hypothesis: Tesseract's page segmentation drops whole regions (text on a screened grey background, a headline)
