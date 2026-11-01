@@ -25,6 +25,9 @@ Tools and score columns: `benchmark/README.md`. Memory between rounds: `benchmar
      then `rescore` the baseline trials;
    - the result is wrong → note the cause: which step, which mechanism.
 
+   A box is right when it wraps its printed word (or lone character) snugly, so selecting it feels natural,
+   whatever the reference's box looks like; a small offset from the reference is no finding to chase.
+
    Done when the journal-worthy hypothesis is one sentence naming the cause, the step and the expected effect.
 
 3. **Gate approach changes.** A change that contradicts an ADR in `docs/adr/` or replaces how a step works

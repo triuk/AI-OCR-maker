@@ -32,7 +32,9 @@ Causes from the baseline analysis, by findings explained (haiku):
    prepare (remove underlines) or ocr.
 6. Tables on p6 read column by column (31 order findings, 402 words); table rules become `|` or markers.
    Step: layout/order.
-7. Approach change, needs the user's yes: AI transcribes whole lines or blocks from the image with the
+7. Scoring: a reference-free box check (does our box wrap the word's ink snugly, without empty margins or a
+   neighbour's ink?) would judge geometry by the real goal instead of by the reference's boxes.
+8. Approach change, needs the user's yes: AI transcribes whole lines or blocks from the image with the
    Tesseract text as a hint, mapped back to the word boxes.
 
 Notes on the scoring: which article comes first on a page is partly a judgement call, so judge large order

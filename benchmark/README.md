@@ -28,7 +28,10 @@ AI steps or scoring reuse it. Compare trials only when their `corrections` diges
 
 ## Reading the scores
 
-Words are paired by their boxes; a box need not match to the pixel (see `evaluation.py`).
+Words are paired by their boxes; a box need not match to the pixel (see `evaluation.py`). The goal for a box
+is that it wraps its printed word (or lone character) snugly, so selecting text in the PDF feels natural.
+The reference's boxes are evidence, not the standard: a `box`, `split` or `merged` finding is a candidate to
+judge on the crop, and ours may well be the better box.
 
 | Column | Meaning | Target |
 |---|---|---|
