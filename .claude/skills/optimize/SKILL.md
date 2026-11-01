@@ -18,17 +18,11 @@ Tools and score columns: `benchmark/README.md`. Memory between rounds: `benchmar
    configuration (below) and the open ideas.
 
 2. **Choose the hypothesis.** Take the worst class in priority order: silent errors (missing text included)
-   → geometry and order → unnecessary review items → cost. Diagnose it on the latest baseline trial with
-   `show --kind …` and `crops … --out <scratchpad>/crops` (look at the PNGs: green is the reference, red
-   ours; at most ~20 crops per round). For every finding you judge on the scan:
-   - the reference is wrong → add a correction to `benchmark/corrections/<document>.json` (with a `note`),
-     then `rescore` the baseline trials;
-   - the result is wrong → note the cause: which step, which mechanism.
-
-   A box is right when it wraps its printed word (or lone character) snugly, so selecting it feels natural,
-   whatever the reference's box looks like; a small offset from the reference is no finding to chase.
-
-   Done when the journal-worthy hypothesis is one sentence naming the cause, the step and the expected effect.
+   → geometry and order → unnecessary review items → cost. Dispatch a general-purpose subagent to diagnose
+   it; its prompt names the class, the baseline trial IDs, the scratchpad path, and says: "Follow the section
+   *Diagnosis* in `.claude/skills/optimize/SKILL.md`." Stay out of the crops yourself; open one only when the
+   report leaves the mechanism unclear. Done when the journal-worthy hypothesis is one sentence naming the
+   cause, the step and the expected effect.
 
 3. **Gate approach changes.** A change that contradicts an ADR in `docs/adr/` or replaces how a step works
    (for example AI transcribing whole lines instead of single problem spots) goes to the user first: write
@@ -61,6 +55,25 @@ Tools and score columns: `benchmark/README.md`. Memory between rounds: `benchmar
 
 8. **Report** to the user in Czech, in a few lines: what was tried, the numbers, kept or not, the next idea,
    and the yes/no question if step 3 raised one.
+
+## Diagnosis
+
+Run by the subagent of step 2. Tools: `benchmark/README.md`. On the given baseline trial, list the class's
+findings with `show --kind …` and render them with `crops … --out <scratchpad>/crops`; look at the PNGs
+(green is the reference, red ours), at most ~20 crops. For every finding you judge on the scan:
+
+- the reference is wrong → add a correction to `benchmark/corrections/<document>.json` (with a `note`),
+  then `rescore` the baseline trials;
+- the result is wrong → name the cause: which step, which mechanism.
+
+A box is right when it wraps its printed word (or lone character) snugly, so selecting it feels natural,
+whatever the reference's box looks like; a small offset from the reference is no finding to chase.
+
+Done when every crop you rendered is judged. Report back only:
+
+1. corrections added: count per document, and the rescored numbers;
+2. result errors grouped by cause: step, mechanism, count, two or three finding IDs as examples;
+3. the cause group you would attack first, as a one-sentence hypothesis with its expected effect.
 
 ## Configurations
 
