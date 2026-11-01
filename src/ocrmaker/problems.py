@@ -12,6 +12,8 @@ word of a page file (ocrmaker.words) is checked for these signals:
     implausible_diacritics  a letter the language does not have, or Czech "ě" or "ů" where Czech never puts them
     mixed_case              an upper-case letter right after a lower-case one, e.g. "rYchvald"
     odd_symbols             a character that is neither a letter, a digit nor usual punctuation, e.g. "|omněl"
+    joins_next_line         a line's last word, read without a hyphen, that forms a dictionary word with the next
+                            line's first word: the line-end hyphen was lost (cut off by the scan, say)
 
 and classified as one kind:
 
@@ -47,6 +49,8 @@ EDGE_PUNCTUATION = "\"'„“”‚‘’»«›‹()[]{}<>.,;:!?…–—-‐*/
 # Punctuation that may stand inside a word: compounds, abbreviations, dates, times, numbers.
 INNER_PUNCTUATION = set("-‐'’./,:&+%°")
 HYPHENS = ("-", "‐", "¬")
+# A word ending in one of these closes a clause, so it cannot run on into the next line.
+CLOSING_PUNCTUATION = set(".,;:!?…)]}»«“”\"")
 _UNIT = re.compile(r"^\d+[^\W\d_]{1,3}$")  # 5kg, 2x, 10km, 1990s
 _CZECH_E_CARON = set("bpvfmdtn")
 
@@ -126,6 +130,7 @@ def detect(page: dict, *, language: str, unreadable_below: float, doubtful_below
                           for line in lines for word in line["words"]
                           if word["text"] and word["confidence"] >= doubtful_below])
     dictionary = _dictionary_verdicts(lines, known, doubtful_below) if known else {}
+    run_on = _lost_hyphens(lines, known, doubtful_below) if known else set()
     spots = []
     for line in lines:
         words = line["words"]
@@ -153,6 +158,8 @@ def detect(page: dict, *, language: str, unreadable_below: float, doubtful_below
                 if dictionary.get(word["id"]) is False:
                     signals.append("not_in_dictionary")
                 signals += character_signals(text, language)
+                if word["id"] in run_on:
+                    signals.append("joins_next_line")
             if not signals:
                 continue
             unreadable = any(signal in UNREADABLE_SIGNALS for signal in signals) or (
@@ -197,6 +204,31 @@ def _dictionary_verdicts(lines: list[dict], known: Callable[[str], bool], truste
         joined = _known(head + tail, known, dotted) or _known(f"{head}-{tail}", known, dotted)
         verdicts[last["id"]] = verdicts[first["id"]] = joined
     return verdicts
+
+
+def _lost_hyphens(lines: list[dict], known: Callable[[str], bool], trusted: float) -> set[str]:
+    """Ids of line-end words read without a hyphen that form a dictionary word with the next line's first word.
+
+    Only a trusted continuation in lower case counts, and only when one of the two is no word on its own:
+    "do" + "opravených" are two words even though "doopravených" is one too.
+    """
+    lost = set()
+    for line in lines:
+        last = next((word for word in reversed(line["words"]) if word["text"]), None)
+        if not last or last["text"].endswith(HYPHENS) or not core(last["text"]).isalpha():
+            continue  # numbers and codes do not break into the next line
+        if CLOSING_PUNCTUATION & set(last["text"][len(last["text"].rstrip(EDGE_PUNCTUATION)):]):
+            continue
+        following = _continuation(line, lines)
+        first = following["words"][0] if following and following["words"] else None
+        if first is None or not first["text"] or first["confidence"] < trusted or not first["text"][0].islower():
+            continue
+        text = first["text"]
+        dotted = text[len(text.rstrip(EDGE_PUNCTUATION)):].startswith(".")
+        head, tail = core(last["text"]), core(text)
+        if _known(head + tail, known, dotted) and not (_known(head, known) and _known(tail, known, dotted)):
+            lost.add(last["id"])
+    return lost
 
 
 def _continuation(line: dict, lines: list[dict]) -> dict | None:

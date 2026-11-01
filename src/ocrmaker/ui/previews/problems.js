@@ -17,6 +17,7 @@
     implausible_diacritics: "nepravděpodobná diakritika",
     mixed_case: "smíšená velká a malá písmena",
     odd_symbols: "neobvyklé znaky",
+    joins_next_line: "pokračuje na dalším řádku bez spojovníku",
   };
   const percent = value => `${Math.round(value)} %`;
 

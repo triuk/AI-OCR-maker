@@ -111,6 +111,10 @@ Rules:
 marks is read correctly and stays as it is.
 - Give for each reading the ids it covers and the printed words for them, exactly as printed, with \
 punctuation attached as printed (a line-end hyphen stays). Never join words across lines.
+- A spot with the signal joins_next_line ends its line without a hyphen, yet together with the next line's \
+first word it makes one word. If the print shows the word breaking there (its line end cut off by the scan \
+edge, or a hyphen the local OCR missed), the printed word ends with the hyphen: give it with "-" and \
+error "recognition". If the print shows two separate words, give the word as printed.
 - Usually one id is one word. If the local OCR split one printed word into several marked boxes, give one \
 reading with all of those ids (consecutive in one line) and one word. If one marked box holds several \
 printed words, give one reading with that id and the words in order.

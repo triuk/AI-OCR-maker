@@ -212,6 +212,20 @@ def test_a_hyphenated_word_whose_continuation_is_unreadable_is_judged_only_by_th
     assert {text: spot["kind"] for text, spot in flagged(workflow, project).items()} == {"": "unreadable"}
 
 
+def test_a_line_end_word_that_runs_on_into_the_next_line_without_a_hyphen_is_doubtful(tmp_path):
+    lines = [[("Obecní", 96.0), ("úřad", 96.0), ("při", 96.0)],
+             [("pravuje", 95.0), ("rozpočet", 96.0), ("a", 96.0), ("sporto'", 91.0)],
+             [("vání", 95.0), ("schválilo.", 96.0), ("Žáci", 95.0), ("se", 96.0), ("do", 96.0)],
+             [("opravených", 95.0), ("tříd", 96.0), ("vrátí", 96.0), ("do", 96.0)],
+             [("Rychvaldu", 95.0), ("vání.", 96.0)]]
+    workflow, project = scripted(tmp_path, [lines], project_dictionary=["Rychvaldu"])
+    spots = flagged(workflow, project)
+
+    assert spots["při"]["kind"] == "doubtful" and spots["při"]["signals"] == ["joins_next_line"]
+    assert "joins_next_line" in spots["sporto'"]["signals"]
+    assert {text for text, spot in spots.items() if "joins_next_line" in spot["signals"]} == {"při", "sporto'"}
+
+
 TWO_PAGES = [[CLEAN, [("Rych4ald", 95.0), ("", 0.0), ("obec", 20.0)]],
              [[("Zbrdlíkov", 96.0), ("pŕíští", 95.0)], CLEAN]]
 
