@@ -5,12 +5,15 @@
 review lists the word); reference words are {"text", "bbox"}.
 
 Words are paired by geometry, not by text: a reference word and one of ours overlap when their intersection
-covers at least OVERLAP of the smaller box. Overlapping words form groups; a group with one word on each side
+covers at least OVERLAP of the smaller box; punctuation (a word without letters or digits) also pairs when
+the smaller box's centre lies within NEAR points of the larger one, as a dash boxed at its ink height on one
+side and at line height on the other. Overlapping words form groups; a group with one word on each side
 is a match, others are a split (one reference word, several of ours), a merge (the reverse) or a tangle.
 A word without any partner is missing (reference only) or extra (ours only). Boxes need not agree to the
-pixel: a matched pair is a misplaced box only when its intersection over union is below BOX_IOU. A group's
-text is judged whole (without the spaces between its words when it has several, so a split or merge with
-the right letters is only a geometry finding), after TEXT_FORMS unify hyphen characters.
+pixel: a matched pair of words with letters or digits is a misplaced box only when its intersection over
+union is below BOX_IOU; punctuation is boxed too differently to judge. A group's text is judged whole, with
+a space between its words as a reader copies it (a lost or added space is wrong text), after TEXT_FORMS
+unify hyphen characters.
 
     {"totals": {"reference_words", "correct", <finding kind>: count, ...},
      "pages": [{"index", "totals"}],
@@ -31,6 +34,7 @@ from pathlib import Path
 import pymupdf
 
 OVERLAP = 0.5
+NEAR = 4.0
 BOX_IOU = 0.6
 # Characters two transcriptions write differently for the same print: soft, non-breaking and Unicode hyphens.
 TEXT_FORMS = str.maketrans({"\u00ad": "-", "\u2010": "-", "\u2011": "-"})
@@ -109,7 +113,7 @@ def _groups(ours: list[dict], reference: list[dict]) -> list[dict]:
 
     for r, reference_word in enumerate(reference):
         for o, our_word in enumerate(ours):
-            if _overlaps(reference_word["bbox"], our_word["bbox"]):
+            if _paired(reference_word, our_word):
                 parent[find(r)] = find(len(reference) + o)
     groups: dict[int, dict] = {}
     for node in range(len(parent)):
@@ -154,6 +158,8 @@ def _geometry(reference_words: list[dict], our_words: list[dict]) -> str | None:
         return "split"
     if len(reference_words) > 1:
         return "merged"
+    if not any(_letters(word) for word in reference_words + our_words):
+        return None
     a, b = reference_words[0]["bbox"], our_words[0]["bbox"]
     intersection = _intersection(a, b)
     return "box" if intersection < BOX_IOU * (_area(a) + _area(b) - intersection) else None
@@ -172,9 +178,24 @@ def _overlaps(a, b) -> bool:
     return smaller > 0 and _intersection(a, b) >= OVERLAP * smaller
 
 
+def _paired(reference_word: dict, our_word: dict) -> bool:
+    a, b = reference_word["bbox"], our_word["bbox"]
+    if _overlaps(a, b):
+        return True
+    if any(_letters(word) for word in (reference_word, our_word)):
+        return False
+    small, large = sorted((a, b), key=_area)
+    x, y = (small[0] + small[2]) / 2, (small[1] + small[3]) / 2
+    return large[0] - NEAR <= x <= large[2] + NEAR and large[1] - NEAR <= y <= large[3] + NEAR
+
+
+def _letters(word: dict) -> bool:
+    return any(char.isalnum() for char in word["text"])
+
+
 def _text(words: list[dict]) -> str:
-    """A group's text as compared: its words in normal form, without spaces when there are several."""
-    return "".join(_joined([word]).translate(TEXT_FORMS) for word in words)
+    """A group's text as compared: its words in normal form, one space apart."""
+    return _joined(words).translate(TEXT_FORMS)
 
 
 def _joined(words: list[dict]) -> str:

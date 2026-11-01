@@ -66,10 +66,18 @@ def test_a_word_cut_into_several_boxes_is_a_split_and_its_text_is_judged_whole()
     assert result["findings"][0]["ours"] == "RY (SH VA LD"
 
 
-def test_two_printed_words_in_one_box_are_merged_and_only_a_geometry_error_when_the_letters_are_right():
+def test_two_printed_words_in_one_box_are_merged_and_their_lost_space_is_wrong_text():
+    # Copied from the OCR PDF, the words read "doroku": a reader sees the error, so it is not only geometry.
     reference = [[ref("do", 10, width=18), ref("roku", 32, width=30)]]
-    assert kinds(compare([[our("doroku", 10, width=52)]], reference)) == ["merged"]
-    assert kinds(compare([[our("doroky", 10, width=52)]], reference)) == ["merged", "silent"]
+    assert kinds(compare([[our("doroku", 10, width=52)]], reference)) == ["merged", "silent"]
+
+
+def test_a_dash_boxed_at_ink_height_pairs_with_our_line_height_box():
+    # The reference boxes a dash only as tall as its ink, we box it as tall as the line: the same dash.
+    reference = [[{"text": "-", "bbox": [60, 105, 64, 107]}]]
+    assert compare([[our("-", 59, width=7)]], reference)["findings"] == []
+    # Just outside our box: still that dash, not a missing and an extra one.
+    assert compare([[our("-", 52, width=7)]], reference)["findings"] == []
 
 
 def test_hyphen_characters_of_the_same_print_compare_equal():
@@ -136,3 +144,8 @@ def test_corrections_of_the_reference_replace_remove_and_add_words(tmp_path):
     pages = read_reference(pdf, corrections)
     assert [word["text"] for word in pages[0]] == ["Rychvald", "roku", "2000"]
     assert pages[0][1]["bbox"] == [200, 40, 230, 52]
+
+
+def test_a_short_word_next_to_another_is_not_paired_with_it():
+    reference = [[ref("v", 10, width=5), ref("Rychvaldě", 16.5, width=50)]]
+    assert compare([[our("v", 10, width=5), our("Rychvaldě", 16.5, width=50)]], reference)["findings"] == []

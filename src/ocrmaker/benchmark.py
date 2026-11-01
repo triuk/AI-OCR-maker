@@ -260,7 +260,7 @@ def summary(record: dict) -> dict:
     totals, ai = record["totals"], record.get("ai") or {}
     usage = ai.get("usage") or {}
     return {"trial": record["id"][:22], "document": record["document"],
-            "config": record["label"] or describe(record["settings"]), "commit": record["commit"] or "",
+            "config": describe(record["settings"]), "label": record["label"] or "", "commit": record["commit"] or "",
             "failed": (record.get("failed") or {}).get("step") or "",
             "correct %": round(100 * totals["correct"] / max(1, totals["reference_words"]), 2),
             "silent": totals.get("silent", 0) + totals.get("missing", 0),
@@ -274,10 +274,10 @@ def summary(record: dict) -> dict:
 def table(rows: list[dict]) -> str:
     if not rows:
         return "(none)"
-    columns = list(rows[0])
-    widths = {c: max(len(c), *(len(str(row[c])) for row in rows)) for c in columns}
+    columns = list(dict.fromkeys(column for row in rows for column in row))
+    widths = {c: max(len(c), *(len(str(row.get(c, ""))) for row in rows)) for c in columns}
     lines = ["  ".join(c.ljust(widths[c]) for c in columns)]
-    lines += ["  ".join(str(row[c]).ljust(widths[c]) for c in columns) for row in rows]
+    lines += ["  ".join(str(row.get(c, "")).ljust(widths[c]) for c in columns) for row in rows]
     return "\n".join(lines)
 
 

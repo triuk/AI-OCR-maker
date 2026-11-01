@@ -1,1 +1,9 @@
-[]
+[
+  {"page": 3, "bbox": [78.84, 282.78, 114.12, 289.98], "text": "vitamínu", "note": "the print has í; the reference wrote i"},
+  {"page": 3, "bbox": [158.76, 282.6, 210.24, 289.98], "text": "multivitamín", "note": "the print has í; the reference wrote i"},
+  {"page": 3, "bbox": [235.08, 282.6, 270.0, 291.96], "text": "vitamíny", "note": "the print has í; the reference wrote i"},
+  {"page": 3, "bbox": [349.02, 137.88, 403.74, 147.24], "text": "vitamínových", "note": "the print has í; the reference wrote i"},
+  {"page": 6, "bbox": [170.1, 341.28, 196.92, 350.1], "text": "Žídková", "note": "the print has í; the reference wrote i"},
+  {"page": 6, "bbox": [171.18, 354.06, 202.86, 361.26], "text": "Kulíšková", "note": "the print has í; the reference wrote i"},
+  {"page": 6, "bbox": [594.9, 300.24, 610.02, 307.98], "text": "1908", "note": "the print reads 1908; the reference wrote 1900"}
+]
