@@ -9,8 +9,8 @@ The latest kept trial of each configuration; every round compares against these.
 
 | Configuration | Trial | correct % | silent | geometry | order | review | unnecessary |
 |---|---|---|---|---|---|---|---|
-| claude haiku high | – | | | | | | |
-| codex gpt-6-luna high | – | | | | | | |
+| claude haiku high | 20261101T161756 | 93.95 | 145 | 260 | 50/1112w | 238 | 10 |
+| codex gpt-6-luna high | 20261101T164325 | 94.45 | 185 | 281 | 51/1338w | 200 | 33 |
 
 ## Open ideas
 
