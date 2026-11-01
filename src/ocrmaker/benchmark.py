@@ -13,35 +13,41 @@ The benchmark directory (default `<data dir>/benchmark`, apart from the user's o
 Reference corrections, the findings about the reference itself, live in the repository:
 `benchmark/corrections/<name>.json`, a list in the format of evaluation.read_reference.
 
-A base is a project of one document with only the local steps (LOCAL_STEPS) run. It is kept per document,
-code version and local settings, and every trial starts from a copy of it, so the local steps run once per
-code change and not once per configuration.
+A base is a project of one document with only the local steps (LOCAL_STEPS) run. It is kept per document
+source, version of the local steps' code and local settings, and every trial starts from a copy of it, so the
+local steps run once per change of their code and not once per configuration.
 
-    {"trial": 1, "id", "created", "label", "document", "commit", "code",
+    {"trial": 1, "id", "created", "label", "document", "commit", "code" (local steps' code version),
      "settings": the full project settings, "base": base project id, "project": trial project id,
+     "failed": {"step", "message"} of the step that stopped the run, or null,
      "steps": [{"id", "state", "duration", "shared" (from the base)}],
-     "ai": the run report's AI totals, "review": the review queue counts,
+     "ai": the run report's AI totals, "review": the review queue counts (null without an export),
+     "corrections": digest of the reference corrections scored with,
      "totals", "pages", "findings": the score (evaluation.compare)}
 """
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import shutil
 import subprocess
 from pathlib import Path
 
+import pymupdf
+
 from . import evaluation
 from . import settings as project_settings
 from .diagnostics import new_run_id
 from .files import write_json_atomic
-from .steps import implementations
+from .steps import STEP_IDS, implementations
 from .steps.export_step import PLAN_FILE
 from .store import ProjectStore, now
-from .workflow import FINISHED, Workflow
+from .workflow import FINISHED, FIRST_MANUAL, Workflow
 
 TRIAL_VERSION = 1
 LOCAL_STEPS = ("import", "prepare", "ocr", "layout")
+AUTOMATIC_STEPS = STEP_IDS[:FIRST_MANUAL]
 # The settings the local steps read; a base is kept per their values.
 LOCAL_SETTINGS = ("language",)
 PACKAGE = Path(__file__).resolve().parent
@@ -50,12 +56,28 @@ CORRECTIONS = REPOSITORY / "benchmark" / "corrections"
 
 
 def code_version() -> str:
-    """A digest of the application's source: a base is rebuilt whenever the code changes."""
+    """A digest of the code the local steps run: their modules and every package module those import, in
+    turn. A base is rebuilt when it changes; a change to AI steps or scoring keeps the base."""
+    pending, files = [f"steps.{step}_step" for step in LOCAL_STEPS], {}
+    while pending:
+        module = pending.pop()
+        parts = module.split(".")
+        path = PACKAGE.joinpath(*parts).with_suffix(".py")
+        package = parts[:-1]
+        if not path.is_file():
+            path, package = PACKAGE.joinpath(*parts, "__init__.py"), parts
+        if path in files.values() or not path.is_file():
+            continue
+        files[module] = path
+        for node in ast.walk(ast.parse(path.read_bytes())):
+            if isinstance(node, ast.ImportFrom) and node.level:
+                base = package[:len(package) - node.level + 1] + (node.module.split(".") if node.module else [])
+                pending.append(".".join(base))
+                pending += [".".join(base + [alias.name]) for alias in node.names]
     digest = hashlib.sha256()
-    for path in sorted(PACKAGE.rglob("*")):
-        if path.is_file() and path.suffix in {".py", ".js"} and "__pycache__" not in path.parts:
-            digest.update(str(path.relative_to(PACKAGE)).encode())
-            digest.update(path.read_bytes())
+    for module in sorted(files):
+        digest.update(module.encode())
+        digest.update(files[module].read_bytes())
     return digest.hexdigest()[:16]
 
 
@@ -86,8 +108,14 @@ class Benchmark:
     # Documents ---------------------------------------------------------------------------------------
 
     def add_document(self, name: str, source: Path, reference: Path) -> None:
+        """Add a scan and its reference transcription; their pages must agree in number and size."""
         if not name or "/" in name or name.startswith("."):
             raise ValueError(f"Invalid document name: {name!r}")
+        with pymupdf.open(source) as scan, pymupdf.open(reference) as transcription:
+            sizes = [[(round(page.rect.width), round(page.rect.height)) for page in document]
+                     for document in (scan, transcription)]
+        if sizes[0] != sizes[1]:
+            raise ValueError(f"The reference's pages {sizes[1]} do not match the scan's {sizes[0]}.")
         directory = self.documents / name
         directory.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, directory / "source.pdf")
@@ -96,11 +124,13 @@ class Benchmark:
     def document_names(self) -> list[str]:
         return sorted(path.parent.name for path in self.documents.glob("*/reference.pdf"))
 
-    def reference(self, name: str) -> list[list[dict]]:
-        """The document's reference transcription with the repository's corrections applied."""
+    def reference(self, name: str) -> tuple[list[list[dict]], str]:
+        """The document's reference transcription with the repository's corrections applied, and a digest
+        of those corrections."""
         path = self.corrections / f"{name}.json"
-        corrections = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else []
-        return evaluation.read_reference(self.documents / name / "reference.pdf", corrections)
+        text = path.read_text(encoding="utf-8") if path.is_file() else "[]"
+        pages = evaluation.read_reference(self.documents / name / "reference.pdf", json.loads(text))
+        return pages, hashlib.sha256(text.encode()).hexdigest()[:8]
 
     # Trials ------------------------------------------------------------------------------------------
 
@@ -134,12 +164,15 @@ class Benchmark:
             "name": f"{name} · {label or describe(settings)}", "settings": settings,
             "benchmark": {"trial": trial_id}})
         self.workflow.run(project["id"])
-        if self._finished(project["id"], ("order", "problems", "reconstruct", "lookup")):
+        if self._finished(project["id"], AUTOMATIC_STEPS):
             self.workflow.export(project["id"])
+        states = self.store.get(project["id"])["steps"]
+        stopped = next((step for step in STEP_IDS if states[step]["state"] not in FINISHED), None)
         report = self.workflow.report(project["id"]) or {}
         record = {"trial": TRIAL_VERSION, "id": trial_id, "created": now(), "label": label, "document": name,
                   "commit": commit(), "code": code, "settings": settings, "base": base,
                   "project": project["id"],
+                  "failed": {"step": stopped, "message": states[stopped].get("message")} if stopped else None,
                   "steps": [{"id": step["id"], "state": step["state"], "duration": step["duration"],
                              "shared": step["id"] in LOCAL_STEPS} for step in report.get("steps", [])],
                   "ai": (report.get("ai") or {}).get("totals")}
@@ -150,7 +183,8 @@ class Benchmark:
     def _base(self, name: str, settings: dict, code: str) -> str:
         """The id of the document's base for this code and these local settings, run now if there is none."""
         local = {key: settings[key] for key in LOCAL_SETTINGS}
-        key = hashlib.sha256(json.dumps([name, code, local], sort_keys=True).encode()).hexdigest()[:16]
+        source = hashlib.sha256((self.documents / name / "source.pdf").read_bytes()).hexdigest()
+        key = hashlib.sha256(json.dumps([name, source, code, local], sort_keys=True).encode()).hexdigest()[:16]
         for project in self.store.list():
             if project.get("benchmark", {}).get("base") == key and self._finished(project["id"], LOCAL_STEPS):
                 return project["id"]
@@ -167,15 +201,46 @@ class Benchmark:
         return all(states[step]["state"] in FINISHED for step in steps)
 
     def _score(self, project_id: str, name: str) -> dict:
-        """The score of a trial's export, {"review", "totals", "pages", "findings"}; without an export the
-        result is empty and every reference word is missing."""
+        """The score of a trial's export, {"review", "corrections", "totals", "pages", "findings"}; without an
+        export (a failed trial) the result is empty and every reference word is missing."""
+        plan = self.exported_words(project_id)
+        queue = self.workflow.review_queue(project_id) if plan else None
+        listed = {(item["page"], word_id) for item in queue["items"] for word_id in item["ids"]} if queue else set()
+        ours = [[{**word, "review": (index, word["id"]) in listed} for word in words] for index, words in enumerate(plan)]
+        reference, corrections = self.reference(name)
+        return {"review": queue and queue["counts"], "corrections": corrections,
+                **evaluation.compare(ours, reference)}
+
+    def exported_words(self, project_id: str) -> list[list[dict]]:
+        """The words of a project's export {"id", "text", "bbox"}, page by page in reading order; [] without one."""
         result = self.workflow.result(project_id, "export")
-        plan = result.read_json(PLAN_FILE)["pages"] if result and result.exists(PLAN_FILE) else []
-        queue = self.workflow.review_queue(project_id)
-        listed = {(item["page"], word_id) for item in queue["items"] for word_id in item["ids"]}
-        ours = [[{**word, "review": (page["index"], word["id"]) in listed} for line in page["lines"] for word in line]
-                for page in plan]
-        return {"review": queue["counts"], **evaluation.compare(ours, self.reference(name))}
+        if result is None or not result.exists(PLAN_FILE):
+            return []
+        return [[word for line in page["lines"] for word in line] for page in result.read_json(PLAN_FILE)["pages"]]
+
+    def crops(self, record: dict, findings: list[dict], out: Path) -> list[Path]:
+        """PNG crops of the scan around a trial's findings: the reference box green, our boxes red."""
+        out.mkdir(parents=True, exist_ok=True)
+        boxes = {(index + 1, word["id"]): word["bbox"]
+                 for index, words in enumerate(self.exported_words(record["project"])) for word in words}
+        written = []
+        for number, finding in enumerate(findings, 1):
+            # A fresh copy each time, so that no crop shows the boxes drawn for another.
+            with pymupdf.open(self.store.base_pdf(record["project"])) as document:
+                page = document[finding["page"] - 1]
+                ours = [boxes[(finding["page"], word_id)] for word_id in finding["ids"]
+                        if (finding["page"], word_id) in boxes]
+                area = pymupdf.Rect(finding["bbox"])
+                for box in ours:
+                    area |= pymupdf.Rect(box)
+                clip = pymupdf.Rect(area.x0 - 60, area.y0 - 25, area.x1 + 60, area.y1 + 25) & page.rect
+                page.draw_rect(pymupdf.Rect(finding["bbox"]), color=(0, 0.6, 0), width=0.6)
+                for box in ours:
+                    page.draw_rect(pymupdf.Rect(box), color=(0.9, 0, 0), width=0.6)
+                path = out / f"{number:03d}-p{finding['page']}-{finding['kind']}.png"
+                page.get_pixmap(dpi=200, clip=clip).save(path)
+                written.append(path)
+        return written
 
 
 def describe(settings: dict) -> str:
@@ -186,7 +251,8 @@ def describe(settings: dict) -> str:
 
 # Command line: python -m ocrmaker.benchmark <command> --------------------------------------------------
 
-GEOMETRY = ("missing", "extra", "split", "merged", "tangled", "box")
+# Finding kinds summed in the "geometry" column; missing text counts as silent (GLOSSARY: Silent error).
+GEOMETRY = ("extra", "split", "merged", "tangled", "box")
 
 
 def summary(record: dict) -> dict:
@@ -195,10 +261,12 @@ def summary(record: dict) -> dict:
     usage = ai.get("usage") or {}
     return {"trial": record["id"][:22], "document": record["document"],
             "config": record["label"] or describe(record["settings"]), "commit": record["commit"] or "",
+            "failed": (record.get("failed") or {}).get("step") or "",
             "correct %": round(100 * totals["correct"] / max(1, totals["reference_words"]), 2),
-            "silent": totals.get("silent", 0), "geometry": sum(totals.get(kind, 0) for kind in GEOMETRY),
+            "silent": totals.get("silent", 0) + totals.get("missing", 0),
+            "geometry": sum(totals.get(kind, 0) for kind in GEOMETRY),
             "order": f"{totals.get('order', 0)}/{totals.get('order_words', 0)}w",
-            "review": record["review"]["markers"] + record["review"]["doubtful"],
+            "review": record["review"]["markers"] + record["review"]["doubtful"] if record["review"] else "",
             "unnecessary": totals.get("unnecessary", 0),
             "ai s": round(ai.get("duration") or 0), "tokens": usage.get("total")}
 
@@ -216,33 +284,6 @@ def table(rows: list[dict]) -> str:
 def selected(record: dict, kind: str | None, page: int | None) -> list[dict]:
     return [finding for finding in record["findings"]
             if (kind is None or finding["kind"] == kind) and (page is None or finding["page"] == page)]
-
-
-def crops(benchmark: Benchmark, record: dict, findings: list[dict], out: Path) -> list[Path]:
-    """PNG crops of the scan around findings: the reference box green, our boxes red."""
-    import pymupdf
-    out.mkdir(parents=True, exist_ok=True)
-    result = benchmark.workflow.result(record["project"], "export")
-    plan = result.read_json(PLAN_FILE)["pages"] if result and result.exists(PLAN_FILE) else []
-    boxes = {(page["index"] + 1, word["id"]): word["bbox"] for page in plan for line in page["lines"] for word in line}
-    written = []
-    for number, finding in enumerate(findings, 1):
-        # A fresh copy each time, so that no crop shows the boxes drawn for another.
-        with pymupdf.open(benchmark.store.base_pdf(record["project"])) as document:
-            page = document[finding["page"] - 1]
-            ours = [boxes[(finding["page"], word_id)] for word_id in finding["ids"]
-                    if (finding["page"], word_id) in boxes]
-            area = pymupdf.Rect(finding["bbox"])
-            for box in ours:
-                area |= pymupdf.Rect(box)
-            clip = pymupdf.Rect(area.x0 - 60, area.y0 - 25, area.x1 + 60, area.y1 + 25) & page.rect
-            page.draw_rect(pymupdf.Rect(finding["bbox"]), color=(0, 0.6, 0), width=0.6)
-            for box in ours:
-                page.draw_rect(pymupdf.Rect(box), color=(0.9, 0, 0), width=0.6)
-            path = out / f"{number:03d}-p{finding['page']}-{finding['kind']}.png"
-            page.get_pixmap(dpi=200, clip=clip).save(path)
-            written.append(path)
-    return written
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -315,7 +356,7 @@ def main(argv: list[str] | None = None) -> None:
             print(f"... {len(findings) - args.limit} more")
     elif args.command == "crops":
         record = find(args.trial)
-        for path in crops(benchmark, record, selected(record, args.kind, args.page)[:args.limit], args.out):
+        for path in benchmark.crops(record, selected(record, args.kind, args.page)[:args.limit], args.out):
             print(path)
     elif args.command == "rescore":
         print(table([summary(benchmark.rescore(find(prefix)["id"])) for prefix in args.trial]))

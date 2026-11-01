@@ -23,7 +23,8 @@ Documents, trial projects and trial records live outside the repository, in `<da
 
 A trial copies the document's base (Import, Image preparation, Local OCR and Layout, kept per code version),
 runs the remaining automatic steps with the configuration, exports without manual corrections and scores
-the export. Changing any code rebuilds the base on the next trial (local steps only, a minute or two).
+the export. Changing the local steps' code rebuilds the base on the next trial (a minute or two); changes to
+AI steps or scoring reuse it. Compare trials only when their `corrections` digest is the same (`rescore`).
 
 ## Reading the scores
 
@@ -32,11 +33,12 @@ Words are paired by their boxes; a box need not match to the pixel (see `evaluat
 | Column | Meaning | Target |
 |---|---|---|
 | correct % | reference words whose text the result has exactly | up |
-| silent | wrong text manual review does not list: nobody will see it | 0 |
-| geometry | missing text, extra boxes, split or merged words, boxes far off | 0 |
+| failed | the step that stopped the run; the scores of a failed trial mean nothing | empty |
+| silent | wrong or missing text manual review does not list: nobody will see it | 0 |
+| geometry | extra boxes, split or merged words, boxes far off | 0 |
 | order | runs of text out of the reference reading order / words in them | 0 |
 | review | review queue items (illegible markers and doubtful readings) | only what cannot be determined |
-| unnecessary | review items whose OCR text was already right | 0 |
+| unnecessary | review items whose OCR text was already right (`flagged` findings are review items the reference reads: judge them on the scan) | 0 |
 | ai s, tokens | AI time and tokens of the trial | down, last priority |
 
 `crops` draws the reference box green and ours red. A finding can be the reference's mistake: judge it on

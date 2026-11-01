@@ -8,7 +8,9 @@ Words are paired by geometry, not by text: a reference word and one of ours over
 covers at least OVERLAP of the smaller box. Overlapping words form groups; a group with one word on each side
 is a match, others are a split (one reference word, several of ours), a merge (the reverse) or a tangle.
 A word without any partner is missing (reference only) or extra (ours only). Boxes need not agree to the
-pixel: a matched pair is a misplaced box only when its intersection over union is below BOX_IOU.
+pixel: a matched pair is a misplaced box only when its intersection over union is below BOX_IOU. A group's
+text is judged whole (without the spaces between its words when it has several, so a split or merge with
+the right letters is only a geometry finding), after TEXT_FORMS unify hyphen characters.
 
     {"totals": {"reference_words", "correct", <finding kind>: count, ...},
      "pages": [{"index", "totals"}],
@@ -16,7 +18,8 @@ pixel: a matched pair is a misplaced box only when its intersection over union i
 
 Every count is a number of findings, except reference_words, correct and order_words, which count
 reference words. Finding kinds: silent (wrong text manual review does not list), flagged (wrong text it
-lists), unnecessary (right text it lists all the same), missing, extra, split, merged, tangled, box (a
+lists: a review item the reference reads, so a candidate unnecessary review item to judge on the scan),
+unnecessary (right text it lists all the same), missing (a silent error too, GLOSSARY), extra, split, merged, tangled, box (a
 matched box far off) and order (a run of words, consecutive in the reference, that lies outside the longest
 sequence keeping the reference order: one misplaced block of text is one finding).
 """
@@ -28,10 +31,13 @@ from pathlib import Path
 import pymupdf
 
 OVERLAP = 0.5
-BOX_IOU = 0.5
+BOX_IOU = 0.6
+# Characters two transcriptions write differently for the same print: soft, non-breaking and Unicode hyphens.
+TEXT_FORMS = str.maketrans({"\u00ad": "-", "\u2010": "-", "\u2011": "-"})
 
 
 def compare(ours: list[list[dict]], reference: list[list[dict]]) -> dict:
+    """The score of our pages of words against the reference pages (format in the module docstring)."""
     pages = []
     for index in range(max(len(ours), len(reference))):
         page_ours = ours[index] if index < len(ours) else []
@@ -49,7 +55,7 @@ def _compare_page(index: int, ours: list[dict], reference: list[dict]) -> dict:
     totals = {"reference_words": len(reference), "correct": 0}
     findings = []
 
-    def find(kind: str, reference_words: list[dict], our_words: list[dict]) -> None:
+    def record(kind: str, reference_words: list[dict], our_words: list[dict]) -> None:
         totals[kind] = totals.get(kind, 0) + 1
         findings.append({"page": index + 1, "kind": kind, "reference": _abbreviated(_joined(reference_words)),
                          "ours": _abbreviated(_joined(our_words)), "ids": [word["id"] for word in our_words],
@@ -65,29 +71,29 @@ def _compare_page(index: int, ours: list[dict], reference: list[dict]) -> dict:
             run.append(group)
         elif run:
             reference_words = [reference[i] for g in run for i in g["reference"]]
-            find("order", reference_words, [ours[i] for g in run for i in g["ours"]])
+            record("order", reference_words, [ours[i] for g in run for i in g["ours"]])
             totals["order_words"] = totals.get("order_words", 0) + len(reference_words)
             run = []
     for group in groups:
         reference_words = [reference[i] for i in group["reference"]]
         our_words = [ours[i] for i in group["ours"]]
         if not our_words:
-            find("missing", reference_words, our_words)
+            record("missing", reference_words, our_words)
             continue
         if not reference_words:
-            find("extra", reference_words, our_words)
+            record("extra", reference_words, our_words)
             continue
         geometry = _geometry(reference_words, our_words)
         if geometry:
-            find(geometry, reference_words, our_words)
-        same = _joined(reference_words) == _joined(our_words)
+            record(geometry, reference_words, our_words)
+        same = _text(reference_words) == _text(our_words)
         review = any(word.get("review") for word in our_words)
         if same:
             totals["correct"] += len(reference_words)
             if review:
-                find("unnecessary", reference_words, our_words)
+                record("unnecessary", reference_words, our_words)
         else:
-            find("flagged" if review else "silent", reference_words, our_words)
+            record("flagged" if review else "silent", reference_words, our_words)
     return {"index": index, "totals": totals, "findings": findings}
 
 
@@ -166,6 +172,11 @@ def _overlaps(a, b) -> bool:
     return smaller > 0 and _intersection(a, b) >= OVERLAP * smaller
 
 
+def _text(words: list[dict]) -> str:
+    """A group's text as compared: its words in normal form, without spaces when there are several."""
+    return "".join(_joined([word]).translate(TEXT_FORMS) for word in words)
+
+
 def _joined(words: list[dict]) -> str:
     return " ".join(unicodedata.normalize("NFC", word["text"].strip()) for word in words)
 
@@ -211,7 +222,7 @@ def _insertion(words: list[dict], box) -> int:
     one, or else after the nearest word above it."""
     def same_line(other):
         overlap = min(box[3], other[3]) - max(box[1], other[1])
-        return overlap >= 0.5 * min(box[3] - box[1], other[3] - other[1])
+        return overlap >= OVERLAP * min(box[3] - box[1], other[3] - other[1])
 
     line = [(i, word["bbox"]) for i, word in enumerate(words) if same_line(word["bbox"])]
     left = [(other[0], i) for i, other in line if other[0] < box[0]]

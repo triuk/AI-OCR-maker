@@ -104,6 +104,10 @@ _Avoid_: Edit, fix (too generic)
 An earlier, independently made transcription of a source PDF that is trusted enough to score the automatic result against. It is not an authority: where it disagrees with the print, the source PDF wins and the disagreement is a finding about the reference.
 _Avoid_: Ground truth, gold standard, vzor
 
+**Trial**:
+One run of the automatic workflow on a document with a reference transcription, under one configuration, scored against that reference.
+_Avoid_: Test run, experiment
+
 **Silent error**:
 A word of the automatic result whose text differs from the print although manual review does not list it, so nobody will see it. Text printed on the page but missing from the result is a silent error too.
 

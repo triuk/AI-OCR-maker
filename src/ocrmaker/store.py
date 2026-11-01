@@ -1,7 +1,8 @@
 """Project store: one directory per project, written atomically; the source PDF copy is never modified.
 
 Layout of `<root>/projects/<id>/`:
-    project.json          the project file (name, source facts, settings, step states)
+    project.json          the project file (name, source facts, settings, step states; a benchmark project
+                          also has "benchmark": its base key or trial id, see ocrmaker.benchmark)
     source.pdf            a read-only copy of the user's source PDF
     working.pdf           the clean working copy, once an earlier OCR's text layer was removed (read-only)
     steps/<step id>/      the committed result of each step (see ocrmaker.step.StepResult)

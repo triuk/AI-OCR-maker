@@ -5,7 +5,9 @@ whether manual review lists them; reference words only text and box.
 """
 from __future__ import annotations
 
-from ocrmaker.evaluation import compare
+import pymupdf
+
+from ocrmaker.evaluation import compare, read_reference
 
 
 def ref(text, x0, y0=100, width=40, height=12):
@@ -64,10 +66,15 @@ def test_a_word_cut_into_several_boxes_is_a_split_and_its_text_is_judged_whole()
     assert result["findings"][0]["ours"] == "RY (SH VA LD"
 
 
-def test_two_printed_words_in_one_box_are_merged():
+def test_two_printed_words_in_one_box_are_merged_and_only_a_geometry_error_when_the_letters_are_right():
     reference = [[ref("do", 10, width=18), ref("roku", 32, width=30)]]
-    result = compare([[our("doroku", 10, width=52)]], reference)
-    assert kinds(result) == ["merged", "silent"]
+    assert kinds(compare([[our("doroku", 10, width=52)]], reference)) == ["merged"]
+    assert kinds(compare([[our("doroky", 10, width=52)]], reference)) == ["merged", "silent"]
+
+
+def test_hyphen_characters_of_the_same_print_compare_equal():
+    result = compare([[our("násle\u00ad", 10)]], [[ref("násle-", 10)]])
+    assert result["findings"] == []
 
 
 def test_a_box_slightly_off_is_fine_and_one_far_off_is_misplaced():
@@ -77,6 +84,9 @@ def test_a_box_slightly_off_is_fine_and_one_far_off_is_misplaced():
     # Shifted by most of its own height (an underline pulled it down): it still overlaps, but badly.
     far = compare([[our("Rychvald", 10, y0=105, height=14)]], [[ref("Rychvald", 10)]])
     assert kinds(far) == ["box"]
+    # Stretched down to an underline: twice the word's height.
+    tall = compare([[our("Rychvald", 10, height=24)]], [[ref("Rychvald", 10)]])
+    assert kinds(tall) == ["box"]
 
 
 def test_words_read_out_of_the_reference_order_are_order_errors():
@@ -99,7 +109,6 @@ def reference_pdf(path, pages):
     """A PDF whose text (visible here; an OCR text layer reads the same) is the given words per page.
 
     The base font has no Czech letters, hence the plain words."""
-    import pymupdf
     document = pymupdf.open()
     for words in pages:
         page = document.new_page(width=400, height=300)
@@ -110,7 +119,6 @@ def reference_pdf(path, pages):
 
 
 def test_the_reference_is_read_from_the_pdf_text_layer_page_by_page_in_its_order(tmp_path):
-    from ocrmaker.evaluation import read_reference
     pdf = reference_pdf(tmp_path / "ref.pdf", [[("Rychvald", 50, 50), ("2000", 150, 50)], [("cerven", 50, 50)]])
     pages = read_reference(pdf)
     assert [[word["text"] for word in page] for page in pages] == [["Rychvald", "2000"], ["cerven"]]
@@ -119,7 +127,6 @@ def test_the_reference_is_read_from_the_pdf_text_layer_page_by_page_in_its_order
 
 
 def test_corrections_of_the_reference_replace_remove_and_add_words(tmp_path):
-    from ocrmaker.evaluation import read_reference
     pdf = reference_pdf(tmp_path / "ref.pdf", [[("Rychva1d", 50, 50), ("~", 150, 50), ("2000", 250, 50)]])
     corrections = [
         {"page": 1, "bbox": [50, 40, 100, 52], "text": "Rychvald", "note": "the print reads Rychvald"},

@@ -5,9 +5,11 @@ The AI is scripted (fakes.default_provider); OCR, layout and the scoring are the
 """
 from __future__ import annotations
 
+import pytest
 from pdfs import SAMPLE_TEXT, scan_pdf
 
-from ocrmaker.benchmark import Benchmark
+from ocrmaker.benchmark import Benchmark, summary
+from ocrmaker.language import USAGE_LIMIT, LanguageError
 
 
 def sample_document(tmp_path):
@@ -35,3 +37,24 @@ def test_trials_share_the_local_steps_and_are_scored_against_the_reference(tmp_p
     assert ran == {"order", "problems", "reconstruct", "lookup", "review", "export"}
     assert second["ai"]["requests"] >= 1
     assert [trial["id"] for trial in benchmark.trials()] == [first["id"], second["id"]]
+
+
+def test_a_trial_whose_run_failed_is_recorded_as_failed_with_nothing_exported(tmp_path, language_provider):
+    benchmark = Benchmark(tmp_path / "benchmark", language=language_provider)
+    benchmark.add_document("sample", *sample_document(tmp_path))
+    language_provider.on("reading_order", LanguageError("Limit předplatného je vyčerpaný.", code=USAGE_LIMIT))
+    trial, = benchmark.run({"ai_provider": "claude"})
+    assert trial["failed"] == {"step": "order", "message": "Limit předplatného je vyčerpaný."}
+    assert trial["review"] is None and trial["totals"]["correct"] == 0
+    row = summary(trial)
+    assert row["failed"] == "order"
+    # Text missing from the result is a silent error (GLOSSARY), so the silent column counts it.
+    assert row["silent"] == trial["totals"]["reference_words"]
+
+
+def test_a_reference_whose_pages_differ_from_the_scan_is_refused(tmp_path, language_provider):
+    benchmark = Benchmark(tmp_path / "benchmark", language=language_provider)
+    source = scan_pdf(tmp_path / "scan.pdf", pages=2)
+    reference = scan_pdf(tmp_path / "scan-ocr.pdf", pages=1, invisible_text="Rychvald")
+    with pytest.raises(ValueError, match="do not match"):
+        benchmark.add_document("sample", source, reference)
