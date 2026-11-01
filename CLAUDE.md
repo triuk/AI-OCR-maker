@@ -62,3 +62,5 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents
   `text`, `note`, `order` in `src/ocrmaker/corrections.py`) are saved at once, run no step, and reach Export through
   the Review step's result. A manual article order is applied in `export_step.reading_articles`.
   Seam 1 tests that need the outputs run and then export (`tests/fakes.py::run_and_export`).
+- Benchmark (`benchmark/README.md`): trials score the automatic result against reference transcriptions
+  (`src/ocrmaker/benchmark.py`, scoring in `src/ocrmaker/evaluation.py`); `.venv/bin/python -m ocrmaker.benchmark`.

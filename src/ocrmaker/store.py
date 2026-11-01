@@ -143,6 +143,27 @@ class ProjectStore:
             write_json_atomic(self.directory(project_id) / PROJECT_FILE, project)
             return project
 
+    def duplicate(self, project_id: str, changes: dict) -> dict:
+        """A new project with a copy of another's files and step results, its project file updated by changes.
+
+        Diagnostics, run reports and manual corrections stay behind: the copy's history starts with it.
+        """
+        directory = self.directory(project_id)
+        project = self.get(project_id)
+        copy_id = uuid.uuid4().hex
+        staging = self.projects / f".new-{copy_id}"
+        try:
+            shutil.copytree(directory, staging, ignore=shutil.ignore_patterns(
+                "diagnostics", "reports", "corrections.json", ".run.lock", ".working-*"))
+            created = now()
+            copy = {**project, **changes, "id": copy_id, "created": created, "updated": created, "version": 1}
+            write_json_atomic(staging / PROJECT_FILE, copy)
+            staging.rename(self.directory(copy_id))
+        except BaseException:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+        return copy
+
     def delete(self, project_id: str) -> None:
         """Remove a project; the caller holds its run lock. A rename first makes it vanish from the list at once."""
         directory = self.directory(project_id)
