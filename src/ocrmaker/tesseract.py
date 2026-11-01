@@ -4,6 +4,7 @@ from __future__ import annotations
 import unicodedata
 from pathlib import Path
 
+import numpy
 import tesserocr
 from tesserocr import OEM, PSM, RIL, PyTessBaseAPI
 
@@ -66,6 +67,16 @@ class Recognizer:
             return [word for line in self._lines(index, to_source) for word in line["words"]]
         finally:
             api.SetPageSegMode(PSM.AUTO)
+
+    def recognize_pixels(self, pixels: numpy.ndarray, *, index: int, dpi: float, to_source: Matrix) -> dict:
+        """The page file content of a grey image (raster pixels, uint8) instead of a raster file: for a page
+        prepared in memory, such as inkgaps.cleared_page."""
+        api = self._api
+        height, width = pixels.shape
+        api.SetImageBytes(numpy.ascontiguousarray(pixels).tobytes(), width, height, 1, width)
+        api.SetSourceResolution(round(dpi))
+        api.Recognize()
+        return {"index": index, "lines": self._lines(index, to_source)}
 
     def _lines(self, index: int, to_source: Matrix) -> list[dict]:
         """The recognised lines of the last Recognize, words numbered on the page."""

@@ -3,7 +3,12 @@
 Tesseract's automatic page segmentation can drop an isolated short line, typically a centred page number in
 the footer. So uncovered line-like ink in the page's top and bottom bands (`inkgaps.uncovered_edge_lines`)
 is read again as a single text line, and what Tesseract reads there with at least RECOVERED_CONFIDENCE
-becomes a line of its own. Then the ink gap finder adds empty word boxes for ink inside lines no word covers.
+becomes a line of its own. It also drops whole regions it takes for pictures, typically text on a screened grey
+background and sometimes a headline; so the page is read once more with every recognised line erased and the
+paper evened out (`inkgaps.cleared_page`), and the lines read there with RECOVERED_CONFIDENCE are added too,
+unless they are much lower than the page's lines: erasing a neighbouring line cuts off the tops or bottoms of
+letters Tesseract missed, and what is read in such a sliver is a guess (it stays an unreadable word instead).
+Then the ink gap finder adds empty word boxes for ink inside lines no word covers.
 
 The result format is described in `ocrmaker.words`; all geometry is in source page coordinates.
 """
@@ -19,31 +24,49 @@ from ..words import OCR_FILE, page_file, page_words, read_page
 from ..wording import on_pages
 
 
-# A line read again in an edge band is kept when its words reach this mean confidence and hold a letter or
+# A line read again (in an edge band or on the cleared page) is kept when its words reach this mean confidence and hold a letter or
 # digit; anything less is likely an ornament or a smudge, not text.
 RECOVERED_CONFIDENCE = 50.0
+# A line read on the cleared page is kept only when at least this share of the page's median line height.
+RECOVERED_HEIGHT = 0.6
 
 
-def _recover_edge_lines(recognizer, recognised: dict, raster_path, raster: dict) -> dict:
-    """The page file with the lines Tesseract dropped in the edge bands read again (see the module docstring)."""
+def _with_lines(recognised: dict, found: list[list[dict]]) -> dict:
+    """The page file with each word list in `found` that reads like text added as a line of its own."""
     lines = list(recognised["lines"])
     number = recognised["index"] + 1
     count = sum(len(line["words"]) for line in lines)
-    for box in inkgaps.uncovered_edge_lines(recognised, raster_path, raster["to_raster"]):
-        words = recognizer.recognize_line(raster_path, box, index=recognised["index"], dpi=sum(raster["dpi"]) / 2,
-                                          to_source=raster["to_source"])
+    for words in found:
         if not words or sum(word["confidence"] for word in words) / len(words) < RECOVERED_CONFIDENCE \
                 or not any(char.isalnum() for word in words for char in word["text"]):
             continue
-        for word in words:
-            count += 1
-            word["id"] = f"p{number}-w{count}"
+        words = [{**word, "id": f"p{number}-w{count + n}"} for n, word in enumerate(words, start=1)]
+        count += len(words)
         boxes = [word["bbox"] for word in words]
         lines.append({"id": f"p{number}-l{len(lines) + 1}",
                       "bbox": [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes),
                                max(b[3] for b in boxes)],
                       "baseline": None, "block": -1, "paragraph": -1, "words": words})
     return {**recognised, "lines": lines}
+
+
+def _recover_edge_lines(recognizer, recognised: dict, raster_path, raster: dict) -> dict:
+    """The page file with the lines Tesseract dropped in the edge bands read again (see the module docstring)."""
+    return _with_lines(recognised, [
+        recognizer.recognize_line(raster_path, box, index=recognised["index"], dpi=sum(raster["dpi"]) / 2,
+                                  to_source=raster["to_source"])
+        for box in inkgaps.uncovered_edge_lines(recognised, raster_path, raster["to_raster"])])
+
+
+def _recover_dropped_regions(recognizer, recognised: dict, raster_path, raster: dict) -> dict:
+    """The page file with the lines read on the cleared page added (see the module docstring)."""
+    again = recognizer.recognize_pixels(inkgaps.cleared_page(recognised, raster_path, raster["to_raster"]),
+                                        index=recognised["index"], dpi=sum(raster["dpi"]) / 2,
+                                        to_source=raster["to_source"])
+    heights = sorted(line["bbox"][3] - line["bbox"][1] for line in recognised["lines"])
+    least = RECOVERED_HEIGHT * heights[len(heights) // 2] if heights else 0
+    return _with_lines(recognised, [line["words"] for line in again["lines"]
+                                    if line["bbox"][3] - line["bbox"][1] >= least])
 
 
 class OcrStep(Step):
@@ -68,6 +91,7 @@ class OcrStep(Step):
                 recognised = recognizer.recognize(raster_path, index=page["index"], dpi=sum(raster["dpi"]) / 2,
                                                   to_source=raster["to_source"])
                 recognised = _recover_edge_lines(recognizer, recognised, raster_path, raster)
+                recognised = _recover_dropped_regions(recognizer, recognised, raster_path, raster)
                 recognised = inkgaps.find_empty_words(recognised, raster_path, raster["to_raster"],
                                                       raster["to_source"])
                 ctx.output.write_json(page_file(page["index"]), recognised)

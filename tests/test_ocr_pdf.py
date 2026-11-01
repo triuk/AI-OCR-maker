@@ -200,3 +200,20 @@ def test_an_isolated_centred_page_number_in_the_footer_is_not_lost(tmp_path, foo
     assert kinds == {"footer"}
     [markdown] = [output["name"] for output in workflow.outputs(project["id"]) if output["name"].endswith(".md")]
     assert "printed=5" in workflow.output(project["id"], markdown).read_text(encoding="utf-8")
+
+
+NOTICE = "Oznamujeme občanům, že kontejnery budou přistaveny na stejných místech jako minule."
+
+
+def test_text_printed_on_a_halftone_grey_background_is_read(tmp_path):
+    # Tesseract's page segmentation takes a screened grey box for a picture and reads none of its text.
+    items = [Print("left", (LEFT[0], 40, LEFT[1], 400), PARISH), Print("right", (RIGHT[0], 40, RIGHT[1], 400), PARISH),
+             Print("notice-head", (LEFT[0], 440, RIGHT[1], 461), "Mimořádné přistavení kontejnerů", size=16,
+                   shade=True),
+             Print("notice", (LEFT[0], 471, RIGHT[1], 505), NOTICE, shade=True)]
+    workflow = Workflow(ProjectStore(tmp_path / "library"), language=None)
+    project = run_and_export(workflow, workflow.create(printed_pdf(tmp_path / "zpravodaj.pdf", [items]))["id"])
+
+    read = [word["text"] for word in stored_words(workflow, project) if word["bbox"][1] > 430]
+    expected = items[2].words + items[3].words
+    assert SequenceMatcher(None, read, expected).ratio() > 0.9, read

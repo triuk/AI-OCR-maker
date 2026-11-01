@@ -9,8 +9,9 @@ in display order (see ocrmaker.words). Problem detection marks every empty word 
 
 Everything is measured on the working raster, in pixels, relative to the line's height, so it does not
 depend on resolution. Ink is a pixel clearly darker than the paper around it; the paper level is measured
-locally, so a shaded gutter does not count as ink; underlines are ignored, and ink that continues above and
-below the line (a rule, an image edge, the binding's shadow) is not a word.
+locally, so a shaded gutter does not count as ink, and a print screen is averaged first, so the dots of a grey
+background do not either; underlines are ignored, and ink that continues above and below the line (a rule, an
+image edge, the binding's shadow) is not a word.
 """
 from __future__ import annotations
 
@@ -67,13 +68,18 @@ def _pixel_box(to_raster: Matrix, bbox) -> tuple[float, float, float, float]:
 class _Page:
     """The ink mask of one working raster and the page's word boxes in raster pixels."""
 
-    def __init__(self, grey: numpy.ndarray):
+    def __init__(self, grey: numpy.ndarray, paper: numpy.ndarray | None = None):
         self.grey = grey.astype(numpy.float32)
         self.height, self.width = grey.shape
         self.darkest = float(numpy.percentile(self.grey, 0.5))
+        self.paper = paper  # the paper level of every pixel, when measured over the whole page (_descreened)
 
     def ink(self, top: int, bottom: int, around: int, contrast: float = INK_CONTRAST) -> numpy.ndarray:
-        """The ink mask of rows top..bottom, with the paper level measured over `around` extra rows each side."""
+        """The ink mask of rows top..bottom, with the paper level measured over `around` extra rows each side
+        (or taken from the page's paper levels when it has them)."""
+        if self.paper is not None:
+            paper = self.paper[top:bottom]
+            return self.grey[top:bottom] < paper - contrast * numpy.maximum(paper - self.darkest, 0) - 1
         rows = self.grey[max(0, top - around):min(self.height, bottom + around)]
         # Per column the paper is the light end of the rows around the line, smoothed along the line.
         paper = numpy.percentile(rows, 90, axis=0)
@@ -90,7 +96,7 @@ def find_empty_words(recognised: dict, raster: Path, to_raster: Matrix, to_sourc
 
     The added words get ids `p<page>-e<n>`; the lines keep their order and grow to cover their new words.
     """
-    page = _Page(_grey(raster))
+    page = _descreened(raster, [_pixel_box(to_raster, line["bbox"]) for line in recognised["lines"]])
     number = recognised["index"] + 1
     every_word = [_pixel_box(to_raster, word["bbox"]) for line in recognised["lines"] for word in line["words"]]
     # The page's word spacing relative to line height, for lines without enough trusted readings to measure.
@@ -298,6 +304,64 @@ def uncovered_edge_lines(recognised: dict, raster: Path, to_raster: Matrix) -> l
                     continue
                 found.append(box)
     return found
+
+
+# A screened grey area (dots of ink) is averaged twice over this many line heights so that it reads as an even
+# grey; once leaves ripples where the window is not a whole number of screen dots.
+DESCREEN = 0.12
+# The paper level is the lightest grey around each pixel within this many line heights: wider than a letter's
+# stroke, narrower than a shaded box, so text keeps its contrast and a grey background becomes paper.
+PAPER_WINDOW = 1.5
+# A pixel at least this share of its paper level is paper: what is left of the screen after averaging must not
+# look like dots, or Tesseract takes the area for a picture.
+PAPER_SHARE = 0.8
+
+
+def _window(values: numpy.ndarray, size: int, reduce, axis: int) -> numpy.ndarray:
+    """`reduce` (numpy.max, numpy.min, numpy.mean) over a sliding window of `size` pixels along one axis."""
+    if size <= 1:
+        return values
+    pad = [(0, 0), (0, 0)]
+    pad[axis] = (size // 2, size - 1 - size // 2)
+    windows = numpy.lib.stride_tricks.sliding_window_view(numpy.pad(values, pad, mode="edge"), size, axis=axis)
+    return reduce(windows, axis=-1)
+
+
+def _square(values: numpy.ndarray, size: int, reduce) -> numpy.ndarray:
+    return _window(_window(values, size, reduce, 0), size, reduce, 1)
+
+
+def _line_height(boxes, page_height: int) -> float:
+    """The median height (pixels) of the recognised lines' boxes; a guess from the page height without any."""
+    heights = sorted(box[3] - box[1] for box in boxes if box[3] > box[1])
+    return heights[len(heights) // 2] if heights else 0.015 * page_height
+
+
+def _descreened(raster: Path, boxes) -> _Page:
+    """The raster's ink with any print screen averaged into an even grey (see DESCREEN) and the paper level of
+    every pixel measured around it (see PAPER_WINDOW), so that a grey background is paper up to its edges, not
+    ink; `boxes` are the recognised lines (pixels) that give the line height."""
+    grey = _grey(raster).astype(numpy.float32)
+    line = _line_height(boxes, grey.shape[0])
+    size = round(DESCREEN * line)
+    grey = _square(_square(grey, size, numpy.mean), size, numpy.mean)
+    size = round(PAPER_WINDOW * line) | 1
+    return _Page(grey, paper=_square(_square(grey, size, numpy.max), size, numpy.min))
+
+
+def cleared_page(recognised: dict, raster: Path, to_raster: Matrix) -> numpy.ndarray:
+    """The working raster (grey pixels) with every recognised line erased and the paper evened out, for reading
+    again what Tesseract's page segmentation dropped: text on a screened grey background, a headline.
+
+    The screen is averaged away and each pixel is divided by the local paper level, so a grey box becomes
+    white paper with dark letters, as an unshaded page is."""
+    boxes = [_pixel_box(to_raster, line["bbox"]) for line in recognised["lines"]]
+    page = _descreened(raster, boxes)
+    cleared = numpy.clip(page.grey / numpy.maximum(PAPER_SHARE * page.paper, 1) * 255, 0, 255)
+    margin = BOX_MARGIN * _line_height(boxes, page.height)
+    for x0, y0, x1, y1 in boxes:
+        cleared[max(0, int(y0 - margin)):int(y1 + margin) + 1, max(0, int(x0 - margin)):int(x1 + margin) + 1] = 255
+    return cleared.astype(numpy.uint8)
 
 
 # Public access for other local measurements on the same ink (AI reconstruction's word box merges and splits).

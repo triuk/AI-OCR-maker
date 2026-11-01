@@ -20,6 +20,7 @@ class Print:
     text: str
     size: float = 11
     frame: bool = False  # a printed frame around the text, as around an ad
+    shade: bool = False  # a halftone grey background under the text, as under a boxed notice
 
     @property
     def words(self) -> list[str]:
@@ -38,6 +39,8 @@ def printed_pdf(path: Path, pages: list[list[Print]], *, size=(420, 595), dpi: i
             rect = pymupdf.Rect(item.rect)
             if item.frame:
                 page.draw_rect(rect + (-5, -5, 5, 5), color=(0, 0, 0), width=1.2)
+            if item.shade:
+                _halftone(page, rect + (-5, -5, 5, 5))
             overflow = writer.fill_textbox(rect, item.text, font=font, fontsize=item.size)
             assert not overflow, f"{item.key} does not fit its box"
             writer.write_text(page)
@@ -46,6 +49,20 @@ def printed_pdf(path: Path, pages: list[list[Print]], *, size=(420, 595), dpi: i
         scanned.insert_image(scanned.rect, stream=image.tobytes("png"), keep_proportion=False)
     output.save(path)
     return path
+
+
+def _halftone(page: pymupdf.Page, rect: pymupdf.Rect, pitch: float = 0.95, radius: float = 0.31) -> None:
+    """A screened grey area: a grid of black dots, as a printer prints grey (75 lines per inch, a third inked)."""
+    shape = page.new_shape()
+    y = rect.y0
+    while y < rect.y1:
+        x = rect.x0
+        while x < rect.x1:
+            shape.draw_circle((x, y), radius)
+            x += pitch
+        y += pitch
+    shape.finish(color=None, fill=(0, 0, 0))
+    shape.commit()
 
 
 # Two columns with two articles that cross: article A starts in the left column and continues at the top
