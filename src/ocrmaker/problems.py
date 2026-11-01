@@ -192,7 +192,7 @@ def _dictionary_verdicts(lines: list[dict], known: Callable[[str], bool], truste
         last = next((word for word in reversed(line["words"]) if word["text"]), None)
         if not last or not last["text"].endswith(HYPHENS):
             continue
-        following = _continuation(line, lines)
+        following = continuation(line, lines)
         first = following["words"][0] if following and following["words"] else None
         if first is None or not first["text"] or first["confidence"] < trusted:
             # The rest of the word is in another column or on the next page: a fragment cannot be judged.
@@ -219,7 +219,7 @@ def _lost_hyphens(lines: list[dict], known: Callable[[str], bool], trusted: floa
             continue  # numbers and codes do not break into the next line
         if CLOSING_PUNCTUATION & set(last["text"][len(last["text"].rstrip(EDGE_PUNCTUATION)):]):
             continue
-        following = _continuation(line, lines)
+        following = continuation(line, lines)
         first = following["words"][0] if following and following["words"] else None
         if first is None or not first["text"] or first["confidence"] < trusted or not first["text"][0].islower():
             continue
@@ -231,7 +231,7 @@ def _lost_hyphens(lines: list[dict], known: Callable[[str], bool], trusted: floa
     return lost
 
 
-def _continuation(line: dict, lines: list[dict]) -> dict | None:
+def continuation(line: dict, lines: list[dict]) -> dict | None:
     """The line right below in the same column: where a line-end hyphenated word goes on."""
     x0, y0, x1, y1 = line["bbox"]
     height = y1 - y0

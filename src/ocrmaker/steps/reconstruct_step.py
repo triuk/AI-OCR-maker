@@ -15,6 +15,7 @@ from .. import inkgaps, reconstruction as rules
 from ..language import PageRequests, request_fields
 from ..layout import LAYOUT_STEP, read_layout_page
 from ..pages import PREPARED_STEP, apply_rect, read_pages, union
+from ..problems import continuation
 from ..reading_order import ORDER_FILE, ORDER_STEP
 from ..reconstruction import ACCEPTED, PUBLISHER_ERROR, UNRESOLVED
 from ..step import ReportSection, Step, StepContext, StepResult
@@ -67,7 +68,7 @@ class ReconstructStep(Step):
                     entry["request"] = answer.request
                     try:
                         readings, entry["ignored"] = rules.validate(answer.data, prepared["spots"],
-                                                                    prepared["positions"])
+                                                                    prepared["positions"], prepared["breaks"])
                     except ValueError as exc:
                         entry["rejected"] = str(exc)
                         answer = None
@@ -109,6 +110,9 @@ class ReconstructStep(Step):
         lines = {word["id"]: line for line in recognised["lines"] for word in line["words"]}
         positions = {word["id"]: (number, place) for number, line in enumerate(recognised["lines"])
                      for place, word in enumerate(line["words"])}
+        breaks = {line["words"][-1]["id"]: following["words"][0]["id"] for line in recognised["lines"]
+                  if line["words"] for following in [continuation(line, recognised["lines"])]
+                  if following and following["words"]}
         marked = {spot["id"]: spot for spot in spots if spot["id"] in words}
         raster = page["raster"]
         ink = inkgaps.load_ink(ctx.result(raster["step"]).path(raster["file"]))
@@ -146,7 +150,8 @@ class ReconstructStep(Step):
                        "line": inputs[spot_id]["line"]} for spot_id, spot in marked.items()]
         data = {"page": index + 1, "language": ctx.settings.get("language"), "paragraphs": paragraphs,
                 "spots": data_spots}
-        return {"data": data, "images": images, "spots": marked, "positions": positions, "words": words,
+        return {"data": data, "images": images, "spots": marked, "positions": positions, "breaks": breaks,
+                "words": words,
                 "lines": lines, "inputs": inputs, "ink": ink, "raster": raster}
 
     def _records(self, prepared: dict, answer, readings: list[dict], threshold: float, reason: str,

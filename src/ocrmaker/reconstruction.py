@@ -13,7 +13,8 @@ it; fixed), "publisher" (the print itself is wrong; kept as printed, listed in t
 "intended" form) or "none" (the local reading was right). A reading that names an id not marked, repeats
 one, joins ids that are not neighbours or breaks the schema is rejected on its own (`validate`): its spots
 stay unresolved, the page's valid readings still count. Only an answer without a list of readings is
-rejected as a whole.
+rejected as a whole. A reading that writes a hyphen-broken word whole over the last id of one line and the
+first id of the next is split at the line break first (`split_line_break`).
 New word boxes of merges and splits are measured locally on the raster from the gaps between glyphs and the
 words' length ratios (`measure_words`), never taken from the AI.
 
@@ -69,7 +70,7 @@ import pymupdf
 
 from . import inkgaps
 from .pages import apply_rect, union
-from .problems import UNREADABLE
+from .problems import EDGE_PUNCTUATION, HYPHENS, UNREADABLE, core
 
 RECONSTRUCT_STEP = "reconstruct"
 # The illegible marker: the whole text of an unreadable word no automatic attempt resolved (GLOSSARY).
@@ -111,10 +112,11 @@ Rules:
 marks is read correctly and stays as it is.
 - Give for each reading the ids it covers and the printed words for them, exactly as printed, with \
 punctuation attached as printed (a line-end hyphen stays). Never join words across lines.
-- A spot with the signal joins_next_line ends its line without a hyphen, yet together with the next line's \
-first word it makes one word. If the print shows the word breaking there (its line end cut off by the scan \
-edge, or a hyphen the local OCR missed), the printed word ends with the hyphen: give it with "-" and \
-error "recognition". If the print shows two separate words, give the word as printed.
+- A word broken at a line end is two readings: the part on its own line, ending with the hyphen, and the \
+rest on the next line. Give only the part on the spot's line, never the whole word, and keep the hyphen \
+even where the scan cut the line end off: for "ko" at a line end and "panou" on the next line, give "ko-". \
+A spot with the signal joins_next_line is such a line end read without its hyphen; if the print shows two \
+separate words there, give the word as printed.
 - Usually one id is one word. If the local OCR split one printed word into several marked boxes, give one \
 reading with all of those ids (consecutive in one line) and one word. If one marked box holds several \
 printed words, give one reading with that id and the words in order.
@@ -248,17 +250,20 @@ def render_crop(ink: inkgaps.InkPage, to_raster, box: list[float], outlined: lis
     return target
 
 
-def validate(answer, spots: dict[str, dict], positions: dict[str, tuple[int, int]]) -> tuple[list[dict], list[dict]]:
+def validate(answer, spots: dict[str, dict], positions: dict[str, tuple[int, int]],
+             breaks: dict[str, str] | None = None) -> tuple[list[dict], list[dict]]:
     """The valid readings of an answer and the rejected items, each {"item", "problems"} (English).
 
-    positions: OCR word id -> (line, place in line). A reading is rejected when it names an id not marked,
+    positions: OCR word id -> (line, place in line). breaks: a line's last word id -> the first word id of the
+    line it runs on into (`split_line_break`). A reading is rejected when it names an id not marked,
     joins ids that are not neighbours in one line, or breaks the schema; every reading naming an id another
     reading also names is rejected, since the two contradict each other. An answer without a list of readings
     raises ValueError: it is rejected as a whole.
     """
     if not isinstance(answer, dict) or not isinstance(answer.get("readings"), list):
         raise ValueError("the answer has no list of readings")
-    checked = [(reading, _problems(reading, spots, positions)) for reading in answer["readings"]]
+    readings = [part for reading in answer["readings"] for part in split_line_break(reading, spots, breaks or {})]
+    checked = [(reading, _problems(reading, spots, positions)) for reading in readings]
     named: dict[str, int] = {}
     for reading, problems in checked:
         if not problems:
@@ -275,6 +280,35 @@ def validate(answer, spots: dict[str, dict], positions: dict[str, tuple[int, int
         else:
             valid.append(reading)
     return valid, rejected
+
+
+def split_line_break(reading, spots: dict[str, dict], breaks: dict[str, str]) -> list:
+    """A reading that writes a hyphen-broken word whole over a line's last id and the next line's first id,
+    split at the line break: the head with a hyphen, the rest as the continuation's local reading has it.
+
+    "pravidelně" over "pru" + "videlně" becomes "pra-" and "videlně". Any other reading is returned as it is,
+    and one whose word does not end with the continuation's reading is left to be rejected.
+    """
+    if not isinstance(reading, dict):
+        return [reading]
+    ids, words = reading.get("ids"), reading.get("words")
+    if not (isinstance(ids, list) and len(ids) == 2 and isinstance(words, list) and len(words) == 1
+            and isinstance(words[0], str) and all(isinstance(word_id, str) for word_id in ids)):
+        return [reading]
+    head_id, tail_id = ids if breaks.get(ids[0]) == ids[1] else ids[::-1]
+    if breaks.get(head_id) != tail_id or tail_id not in spots:
+        return [reading]
+    word, tail = words[0], core(spots[tail_id]["text"])
+    body = word.rstrip(EDGE_PUNCTUATION)
+    if not tail or len(body) <= len(tail) or not body.endswith(tail):
+        return [reading]
+    cut = len(body) - len(tail)
+    head, rest = word[:cut], word[cut:]
+    if not any(char.isalpha() for char in head):
+        return [reading]
+    return [{**reading, "ids": [head_id], "words": [head if head.endswith(HYPHENS) else head + "-"]},
+            {**reading, "ids": [tail_id], "words": [rest],
+             "error": "none" if rest == spots[tail_id]["text"] else reading.get("error")}]
 
 
 def _problems(reading, spots: dict[str, dict], positions: dict[str, tuple[int, int]]) -> list[str]:

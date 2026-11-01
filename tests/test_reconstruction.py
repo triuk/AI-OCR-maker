@@ -6,6 +6,7 @@ import pymupdf
 import pytest
 
 from fakes import answer_spots, run_and_export
+from ocrmaker import reconstruction as rules
 from ocrmaker.step import Step
 from ocrmaker.steps import implementations
 from ocrmaker.store import ProjectStore
@@ -209,6 +210,29 @@ def test_answer_items_repeating_an_id_are_both_rejected_and_their_spot_stays_unr
     assert reasons["čtv"] == "rejected" and reasons["opr"] is None
     entry = workflow.result(project["id"], "reconstruct").read_json(page_file(0))
     assert len(entry["ignored"]) == 2
+
+
+def test_a_hyphen_broken_word_written_whole_over_two_lines_is_split_at_the_line_break():
+    spots = {"p1-w3": {"text": "pru"}, "p1-w4": {"text": "videlně"}, "p1-w7": {"text": "mlú"},
+             "p1-w8": {"text": "deže,"}, "p1-w9": {"text": "trvů"}, "p1-w10": {"text": "vidclně"}}
+    positions = {"p1-w3": (0, 2), "p1-w4": (1, 0), "p1-w7": (1, 3), "p1-w8": (2, 0), "p1-w9": (2, 4),
+                 "p1-w10": (3, 0)}
+    breaks = {"p1-w3": "p1-w4", "p1-w7": "p1-w8", "p1-w9": "p1-w10"}
+
+    def reading(ids, word):
+        return {"ids": ids, "words": [word], "confidence": 97, "error": "recognition", "reasoning": "Joined.",
+                "intended": None}
+    answer = {"readings": [reading(["p1-w3", "p1-w4"], "pravidelně"), reading(["p1-w8", "p1-w7"], "mládeže,"),
+                           reading(["p1-w9", "p1-w10"], "trvání")]}
+
+    valid, rejected = rules.validate(answer, spots, positions, breaks)
+
+    assert [(item["ids"], item["words"], item["error"]) for item in valid] == [
+        (["p1-w3"], ["pra-"], "recognition"), (["p1-w4"], ["videlně"], "none"),
+        (["p1-w7"], ["mlá-"], "recognition"), (["p1-w8"], ["deže,"], "none")]
+    # The continuation's own reading differs from the word's end: no place to split, so it stays rejected.
+    [refused] = rejected
+    assert refused["item"]["ids"] == ["p1-w9", "p1-w10"] and "not neighbours" in refused["problems"][0]
 
 
 def test_an_answer_without_a_list_of_readings_is_rejected_as_a_whole(tmp_path, language_provider):
