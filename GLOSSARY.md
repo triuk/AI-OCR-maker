@@ -97,3 +97,15 @@ A note the user attaches to a region dragged on the page during manual review. I
 **Manual correction**:
 A change the user makes during manual review: a word's text (typed, or an accepted propagation suggestion), a region note, or a page's article order. It is kept apart from step results and applied when the project is exported, so it never causes earlier steps to run again. Running an earlier step again discards all manual corrections.
 _Avoid_: Edit, fix (too generic)
+
+### Evaluation
+
+**Reference transcription**:
+An earlier, independently made transcription of a source PDF that is trusted enough to score the automatic result against. It is not an authority: where it disagrees with the print, the source PDF wins and the disagreement is a finding about the reference.
+_Avoid_: Ground truth, gold standard, vzor
+
+**Silent error**:
+A word of the automatic result whose text differs from the print although manual review does not list it, so nobody will see it. Text printed on the page but missing from the result is a silent error too.
+
+**Unnecessary review item**:
+An entry of the review queue whose text could reasonably have been determined automatically, from the image, the context or an external source. Manual review is meant only for text that cannot be determined at all.
