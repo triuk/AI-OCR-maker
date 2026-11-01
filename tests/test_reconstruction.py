@@ -235,6 +235,23 @@ def test_a_hyphen_broken_word_written_whole_over_two_lines_is_split_at_the_line_
     assert refused["item"]["ids"] == ["p1-w9", "p1-w10"] and "not neighbours" in refused["problems"][0]
 
 
+def test_a_reading_that_gives_a_box_only_the_first_of_its_run_together_words_keeps_the_rest():
+    spots = {"p1-w1": {"text": "najiž"}, "p1-w2": {"text": "Vsoučasné"}, "p1-w3": {"text": "domya"},
+             "p1-w4": {"text": "Rych4ald"}}
+    positions = {word_id: (0, place) for place, word_id in enumerate(spots)}
+
+    def reading(word_id, word):
+        return {"ids": [word_id], "words": [word], "confidence": 97, "error": "recognition",
+                "reasoning": "Separate words.", "intended": None}
+    answer = {"readings": [reading("p1-w1", "na"), reading("p1-w2", "V"), reading("p1-w3", "domy"),
+                           reading("p1-w4", "Rych")]}
+
+    valid, rejected = rules.validate(answer, spots, positions)
+
+    assert [item["words"] for item in valid] == [["na", "již"], ["V", "současné"], ["domy"], ["Rych"]]
+    assert rejected == []
+
+
 def test_an_answer_without_a_list_of_readings_is_rejected_as_a_whole(tmp_path, language_provider):
     language_provider.on("reconstruction", {"answer": "opravu"})
     workflow, project = run(tmp_path, language_provider, PrintedOcr(readings=DAMAGED))

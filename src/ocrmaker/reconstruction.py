@@ -14,7 +14,9 @@ it; fixed), "publisher" (the print itself is wrong; kept as printed, listed in t
 one, joins ids that are not neighbours or breaks the schema is rejected on its own (`validate`): its spots
 stay unresolved, the page's valid readings still count. Only an answer without a list of readings is
 rejected as a whole. A reading that writes a hyphen-broken word whole over the last id of one line and the
-first id of the next is split at the line break first (`split_line_break`).
+first id of the next is split at the line break first (`split_line_break`); one that gives a box only the
+first of the words its local reading ran together gets the rest of the local reading as the next word
+(`split_dropped_rest`).
 New word boxes of merges and splits are measured locally on the raster from the gaps between glyphs and the
 words' length ratios (`measure_words`), never taken from the AI.
 
@@ -265,7 +267,8 @@ def validate(answer, spots: dict[str, dict], positions: dict[str, tuple[int, int
     """
     if not isinstance(answer, dict) or not isinstance(answer.get("readings"), list):
         raise ValueError("the answer has no list of readings")
-    readings = [part for reading in answer["readings"] for part in split_line_break(reading, spots, breaks or {})]
+    readings = [split_dropped_rest(part, spots) for reading in answer["readings"]
+                for part in split_line_break(reading, spots, breaks or {})]
     checked = [(reading, _problems(reading, spots, positions)) for reading in readings]
     named: dict[str, int] = {}
     for reading, problems in checked:
@@ -312,6 +315,25 @@ def split_line_break(reading, spots: dict[str, dict], breaks: dict[str, str]) ->
     return [{**reading, "ids": [head_id], "words": [head if head.endswith(HYPHENS) else head + "-"]},
             {**reading, "ids": [tail_id], "words": [rest],
              "error": "none" if rest == spots[tail_id]["text"] else reading.get("error")}]
+
+
+def split_dropped_rest(reading, spots: dict[str, dict]):
+    """A reading that gives one id only the first of the words its local reading ran together, with the rest
+    the local reading has added as the next word: "na" for "najiž" becomes "na" and "již".
+
+    The rest must hold at least two letters, so that a reading which only drops a stray mark stays as it is.
+    """
+    if not isinstance(reading, dict):
+        return reading
+    ids, words = reading.get("ids"), reading.get("words")
+    if not (isinstance(ids, list) and len(ids) == 1 and isinstance(ids[0], str) and ids[0] in spots
+            and isinstance(words, list) and len(words) == 1 and isinstance(words[0], str) and words[0][-1:].isalpha()):
+        return reading
+    local = spots[ids[0]]["text"]
+    rest = local[len(words[0]):] if local.startswith(words[0]) else ""
+    if not rest[:1].isalpha() or sum(char.isalpha() for char in rest) < 2:
+        return reading
+    return {**reading, "words": [words[0], rest]}
 
 
 def _problems(reading, spots: dict[str, dict], positions: dict[str, tuple[int, int]]) -> list[str]:
