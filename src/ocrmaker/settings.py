@@ -4,6 +4,7 @@ from __future__ import annotations
 import unicodedata
 
 from . import providers
+from .language import DEFAULT_EFFORT, EFFORTS
 from .problems import THRESHOLDS
 from .tessdata import MODELS
 
@@ -16,6 +17,8 @@ DEFAULTS = {
     "ai_provider": providers.DEFAULT,
     # None means the provider's default model.
     "ai_model": None,
+    # Reasoning effort of every AI request.
+    "ai_effort": DEFAULT_EFFORT,
     # Problem detection: Tesseract confidence thresholds (0-100) and words the project accepts as correct.
     **THRESHOLDS,
     "project_dictionary": [],
@@ -43,6 +46,12 @@ def _ai_model(value):
         return None
     if not isinstance(value, str):
         raise ValueError("Neplatný model AI.")
+    return value
+
+
+def _ai_effort(value):
+    if value not in {effort["id"] for effort in EFFORTS}:
+        raise ValueError("Neznámá úroveň uvažování AI.")
     return value
 
 
@@ -81,6 +90,7 @@ VALIDATORS = {
     "language": _language,
     "ai_provider": _ai_provider,
     "ai_model": _ai_model,
+    "ai_effort": _ai_effort,
     "problem_unreadable_confidence": _confidence,
     "problem_doubtful_confidence": _confidence,
     "project_dictionary": _project_dictionary,
@@ -114,4 +124,5 @@ def choices() -> dict:
     return {"language": [{"id": key, "label": label} for key, label in LANGUAGES.items()],
             "ai_provider": [{"id": name, "label": provider.label, "default_model": provider.default_model()}
                             for name, provider in providers.CATALOG.items()],
-            "ai_model": {name: provider.models() for name, provider in providers.CATALOG.items()}}
+            "ai_model": {name: provider.models() for name, provider in providers.CATALOG.items()},
+            "ai_effort": EFFORTS}

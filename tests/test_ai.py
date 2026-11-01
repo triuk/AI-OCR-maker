@@ -90,6 +90,21 @@ def test_the_project_choice_of_provider_and_model_reaches_the_request(workflow, 
     assert language_provider.requests[0].model == "gpt-6-astra"
 
 
+def test_the_project_reasoning_effort_reaches_the_request(workflow, project, language_provider):
+    assert project["settings"]["ai_effort"] == "medium"
+    workflow.update_settings(project["id"], {"ai_effort": "high"})
+    language_provider.on("reading_order", {"order": [1, 2]})
+    workflow.run(project["id"])
+    record, = ai_records(workflow, project["id"])
+    assert record["effort"] == "high"
+    assert language_provider.requests[0].effort == "high"
+
+
+def test_settings_refuse_an_unknown_reasoning_effort(workflow, project):
+    with pytest.raises(ValueError, match="úroveň uvažování"):
+        workflow.update_settings(project["id"], {"ai_effort": "ultra"})
+
+
 def test_a_failed_request_fails_the_step_with_its_czech_message_and_is_recorded(workflow, project,
                                                                                  language_provider):
     language_provider.on("reading_order", LanguageError("Limit předplatného Claude je vyčerpaný. Zkuste to později.",

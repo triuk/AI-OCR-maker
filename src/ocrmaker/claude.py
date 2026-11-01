@@ -18,14 +18,13 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from .language import (IMAGE_TYPES, MISSING_CLI, UNAUTHORIZED, UNREACHABLE_SERVER, USAGE_LIMIT, Completion,
+from .language import (DEFAULT_EFFORT, IMAGE_TYPES, MISSING_CLI, UNAUTHORIZED, UNREACHABLE_SERVER, USAGE_LIMIT, Completion,
                        LanguageError, LanguageProvider, Request, canonical_json, child_environment, czech_time,
                        find_executable, run_process)
 
 DEFAULT_MODEL = "sonnet"
 MODELS = [{"id": "sonnet", "label": "Sonnet"}, {"id": "opus", "label": "Opus"}, {"id": "fable", "label": "Fable"},
           {"id": "haiku", "label": "Haiku"}]
-EFFORT = "medium"
 # A confirmed subscription login is trusted this long before `claude auth status` is asked again.
 LOGIN_CHECK_SECONDS = 600
 LOGIN_HINT = re.compile(r"/login|invalid api key|not logged in|authentication|oauth|unauthori[sz]ed", re.I)
@@ -73,7 +72,8 @@ class ClaudeProvider(LanguageProvider):
     def default_model(self) -> str:
         return DEFAULT_MODEL
 
-    def complete(self, request: Request, *, model: str | None, stopped: Callable[[], bool]) -> Completion:
+    def complete(self, request: Request, *, model: str | None, stopped: Callable[[], bool],
+                 effort: str | None = None) -> Completion:
         executable = self._executable or find_executable("claude")
         if not executable:
             raise LanguageError(MISSING, code=MISSING_CLI)
@@ -83,7 +83,7 @@ class ClaudeProvider(LanguageProvider):
             system = Path(scratch) / "system.txt"
             system.write_text(request.instructions, encoding="utf-8")
             code, stdout, stderr = run_process(
-                self._command(executable, request, model, system), stdin=self._message(request), cwd=Path(scratch),
+                self._command(executable, request, model, system, effort), stdin=self._message(request), cwd=Path(scratch),
                 env=self._environment(), stopped=stopped, label="Claude")
         return self._answer(code, stdout, stderr)
 
@@ -108,9 +108,10 @@ class ClaudeProvider(LanguageProvider):
             self._login_checked = time.monotonic()
 
     @staticmethod
-    def _command(executable: str, request: Request, model: str | None, system: Path) -> list[str]:
+    def _command(executable: str, request: Request, model: str | None, system: Path,
+                 effort: str | None = None) -> list[str]:
         command = [executable, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-                   "--model", model or DEFAULT_MODEL, "--effort", EFFORT, "--system-prompt-file", str(system),
+                   "--model", model or DEFAULT_MODEL, "--effort", effort or DEFAULT_EFFORT, "--system-prompt-file", str(system),
                    "--tools", "WebSearch" if request.web_search else ""]
         if request.web_search:
             # Without it, -p would refuse the tool for lack of a permission prompt.

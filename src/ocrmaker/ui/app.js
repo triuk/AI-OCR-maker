@@ -82,12 +82,22 @@ function renderProjects() {
   $("projectCount").textContent = projects.length;
   $("projects").innerHTML = visible.map(p => {
     const status = projectStatus(p);
-    return `<button class="project-card ${p.id === currentId ? "selected" : ""}" data-project="${esc(p.id)}" aria-current="${p.id === currentId}">
+    return `<div class="project-item ${p.id === currentId ? "selected" : ""}">
+      <button class="project-card ${p.id === currentId ? "selected" : ""}" data-project="${esc(p.id)}" aria-current="${p.id === currentId}">
       <span class="name">${esc(p.name)}</span>
       <span class="card-detail"><span>${esc(status.label)}</span><span>${p.source.pages} ${plural(p.source.pages, "strana", "strany", "stran")}</span></span>
-      <div class="card-bar"><span style="width:${Math.round(100 * finishedShare(p))}%"></span></div></button>`;
+      <div class="card-bar"><span style="width:${Math.round(100 * finishedShare(p))}%"></span></div></button>
+      <div class="card-tools">
+        <button class="card-tool" data-tool="diagnostics" data-for="${esc(p.id)}" title="Diagnostika běhů" aria-label="Diagnostika projektu ${esc(p.name)}">i</button>
+        <button class="card-tool" data-tool="settings" data-for="${esc(p.id)}" title="Nastavení projektu" aria-label="Nastavení projektu ${esc(p.name)}">⚙</button>
+      </div></div>`;
   }).join("") || `<p class="hint" style="padding:0 7px">${projects.length ? "Žádný projekt neodpovídá hledání." : "Zatím žádné projekty."}</p>`;
   $("projects").querySelectorAll("[data-project]").forEach(card => card.onclick = () => selectProject(card.dataset.project));
+  // The project's own settings and diagnostics: the tool opens its project first.
+  $("projects").querySelectorAll("[data-tool]").forEach(tool => tool.onclick = () => {
+    selectProject(tool.dataset.for);
+    if (tool.dataset.tool === "settings") openSettings(); else act(showDiagnostics);
+  });
 }
 
 function renderWorkspace() {
@@ -108,7 +118,6 @@ function renderWorkspace() {
   $("stopButton").disabled = !p.running;
   $("exportButton").disabled = p.running || !exportable;
   $("exportButton").title = exportable ? "" : "Export zatím není k dispozici";
-  $("settingsButton").disabled = false;
   const failed = p.steps.find(s => s.state === "failed");
   $("projectError").hidden = !failed;
   $("projectError").textContent = failed ? `${failed.label}: ${failed.message || "krok selhal."}` : "";
@@ -286,8 +295,10 @@ async function createProject(event) {
   }
 }
 
-// AI provider and model; an empty model value means the provider's default model.
-function fillProviders(provider, model) {
+// AI provider, model and reasoning effort; an empty model value means the provider's default model.
+function fillProviders(provider, model, effort) {
+  $("settingsEffort").innerHTML = (choices.ai_effort || []).map(c => `<option value="${esc(c.id)}">${esc(c.label)}</option>`).join("");
+  $("settingsEffort").value = effort || "medium";
   $("settingsProvider").innerHTML = (choices.ai_provider || []).map(c => `<option value="${esc(c.id)}">${esc(c.label)}</option>`).join("");
   $("settingsProvider").value = provider;
   fillModels(model);
@@ -300,13 +311,15 @@ function fillModels(model) {
     models.map(m => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join("");
   $("settingsModel").value = model || "";
 }
-function aiChoice() { return {ai_provider: $("settingsProvider").value, ai_model: $("settingsModel").value || null}; }
+function aiChoice() {
+  return {ai_provider: $("settingsProvider").value, ai_model: $("settingsModel").value || null, ai_effort: $("settingsEffort").value};
+}
 
 function openSettings() {
   const p = current();
   if (!p) return;
   fillLanguages($("settingsLanguage"), p.settings.language);
-  fillProviders(p.settings.ai_provider, p.settings.ai_model);
+  fillProviders(p.settings.ai_provider, p.settings.ai_model, p.settings.ai_effort);
   $("checkAiResult").textContent = ""; $("checkAiResult").className = "check-result";
   $("settingsUnreadable").value = p.settings.problem_unreadable_confidence;
   $("settingsDoubtful").value = p.settings.problem_doubtful_confidence;
@@ -352,7 +365,7 @@ function tokens(usage) {
 function recordMessage(r) {
   if (r.kind !== "ai_request") return r.message || "";
   const provider = ((choices.ai_provider || []).find(c => c.id === r.provider) || {}).label || r.provider;
-  return [`${provider} · ${r.model || "výchozí model"} · ${r.purpose}`, tokens(r.usage), r.error].filter(Boolean).join(" · ");
+  return [`${provider} · ${r.model || "výchozí model"}${r.effort ? ` (${r.effort})` : ""} · ${r.purpose}`, tokens(r.usage), r.error].filter(Boolean).join(" · ");
 }
 
 async function deleteProject() {
@@ -379,12 +392,10 @@ function wireControls() {
   $("newProject").onclick = openNewProject;
   $("emptyNewProject").onclick = openNewProject;
   $("newForm").onsubmit = event => act(() => createProject(event));
-  $("settingsButton").onclick = openSettings;
   $("settingsForm").onsubmit = event => act(() => saveSettings(event));
   $("deleteProject").onclick = () => act(deleteProject);
   $("settingsProvider").onchange = () => fillModels(null);
   $("checkAi").onclick = checkAi;
-  $("diagnosticsButton").onclick = () => act(showDiagnostics);
   $("runButton").onclick = () => act(async () => { await api(`/projects/${currentId}/run`, "POST"); await refresh(); });
   $("exportButton").onclick = () => act(async () => { await api(`/projects/${currentId}/export`, "POST"); await refresh(); });
   $("stopButton").onclick = () => act(async () => { await api(`/projects/${currentId}/stop`, "POST"); toast("Zpracování se zastavuje…"); });

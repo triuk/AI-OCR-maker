@@ -362,7 +362,7 @@ class Workflow:
     def check_ai(self, project_id: str, changes: dict | None = None) -> dict:
         """Send a tiny request with the project's AI provider and model and say, in Czech, how it went.
 
-        changes are unsaved settings (ai_provider, ai_model) to try instead of the saved ones. The request
+        changes are unsaved settings (ai_provider, ai_model, ai_effort) to try instead of the saved ones. The request
         is recorded in the project's diagnostics like any other AI request.
         """
         settings = project_settings.merged(self.store.get(project_id)["settings"], changes or {})

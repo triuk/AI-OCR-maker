@@ -93,10 +93,11 @@ def fake(tmp_path, monkeypatch):
 
 def ask(fake, **options):
     model = options.pop("model", "gpt-6.1-sol")
+    effort = options.pop("effort", None)
     request = Request(instructions=options.pop("instructions", "Read the marked words."),
                       data=options.pop("data", {"page": 1, "spots": [{"id": "w7", "partial": "Rychv…"}]}),
                       schema=options.pop("schema", SCHEMA), **options)
-    return CodexProvider().complete(request, model=model, stopped=lambda: False)
+    return CodexProvider().complete(request, model=model, effort=effort, stopped=lambda: False)
 
 
 def config(args) -> dict:
@@ -124,7 +125,13 @@ def test_request_runs_on_the_subscription_isolated_and_without_api_keys(fake):
     overrides = config(args)
     assert overrides["features.shell_tool"] is False
     assert overrides["project_doc_max_bytes"] == 0
+    assert overrides["model_reasoning_effort"] == "medium"
     assert Path(call["cwd"]).name.startswith("ocrmaker-codex-") and not Path(call["cwd"]).exists()
+
+
+def test_the_chosen_reasoning_effort_is_passed_to_the_cli(fake):
+    ask(fake, effort="high")
+    assert config(fake.calls()[0]["args"])["model_reasoning_effort"] == "high"
 
 
 def test_shared_instructions_lead_the_request_and_data_goes_only_to_stdin(fake):

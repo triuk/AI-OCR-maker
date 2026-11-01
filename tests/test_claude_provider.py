@@ -94,11 +94,11 @@ SCHEMA = {"type": "object", "properties": {"words": {"type": "array", "items": {
 
 
 def ask(fake, provider=None, **options):
+    model, effort = options.pop("model", "sonnet"), options.pop("effort", None)
     request = Request(instructions=options.pop("instructions", "Read the marked words."),
                       data=options.pop("data", {"page": 1, "spots": [{"id": "w7", "partial": "Rychv…"}]}),
                       schema=options.pop("schema", SCHEMA), **options)
-    return (provider or ClaudeProvider()).complete(request, model=options.pop("model", "sonnet"),
-                                                   stopped=lambda: False)
+    return (provider or ClaudeProvider()).complete(request, model=model, effort=effort, stopped=lambda: False)
 
 
 def test_request_runs_on_the_subscription_isolated_and_without_api_keys(fake):
@@ -110,12 +110,19 @@ def test_request_runs_on_the_subscription_isolated_and_without_api_keys(fake):
     args = call["args"]
     assert args[0] == "-p"
     assert args[args.index("--model") + 1] == "sonnet"
+    assert args[args.index("--effort") + 1] == "medium"
     assert args[args.index("--setting-sources") + 1] == ""
     assert args[args.index("--mcp-config") + 1] == '{"mcpServers":{}}'
     assert {"--strict-mcp-config", "--no-session-persistence", "--disable-slash-commands"} <= set(args)
     assert "--bare" not in args  # it would require an API key
     # A scratch directory of its own: nothing in the user's working tree can leak into the request.
     assert Path(call["cwd"]).name.startswith("ocrmaker-claude-") and not Path(call["cwd"]).exists()
+
+
+def test_the_chosen_reasoning_effort_is_passed_to_the_cli(fake):
+    ask(fake, effort="xhigh")
+    args = fake.calls()[0]["args"]
+    assert args[args.index("--effort") + 1] == "xhigh"
 
 
 def test_shared_instructions_go_to_the_cached_system_prompt_and_data_only_to_stdin(fake):

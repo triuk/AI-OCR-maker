@@ -86,6 +86,7 @@ class ScriptedRequest:
     images: list[bytes]
     web_search: bool
     model: str | None
+    effort: str | None = None
 
 
 class ScriptedProvider(LanguageProvider):
@@ -125,11 +126,11 @@ class ScriptedProvider(LanguageProvider):
     def default_model(self) -> str:
         return self.model
 
-    def complete(self, request: Request, *, model, stopped) -> Completion:
+    def complete(self, request: Request, *, model, stopped, effort=None) -> Completion:
         scripted = ScriptedRequest(purpose=request.purpose, instructions=request.instructions,
                                    data=copy.deepcopy(request.data), schema=request.schema,
                                    images=[Path(image).read_bytes() for image in request.images],
-                                   web_search=request.web_search, model=model)
+                                   web_search=request.web_search, model=model, effort=effort)
         with self._lock:
             self.requests.append(scripted)
             queue = self.answers.get(request.purpose)

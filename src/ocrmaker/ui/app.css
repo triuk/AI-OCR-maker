@@ -42,7 +42,14 @@ h2 { margin: 0 0 18px; font-size: 19px; }
 .wide { width: 100%; }
 .sidebar-label { color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: 1.4px; margin: 26px 7px 10px; display: flex; justify-content: space-between; }
 .project-list { overflow: auto; flex: 1; margin: 12px -7px; }
-.project-card { display: block; text-align: left; width: 100%; border-color: transparent; background: transparent; padding: 12px; margin-bottom: 5px; }
+.project-item { position: relative; margin-bottom: 5px; }
+.project-card { display: block; text-align: left; width: 100%; border-color: transparent; background: transparent; padding: 12px; }
+.project-card .name { padding-right: 58px; }
+.card-tools { position: absolute; top: 7px; right: 7px; display: flex; gap: 3px; opacity: 0; transition: opacity .12s; }
+.project-item.selected .card-tools, .project-item:hover .card-tools, .card-tools:focus-within { opacity: 1; }
+.card-tool { width: 24px; height: 24px; padding: 0; font-size: 13px; line-height: 1; color: var(--muted); background: transparent; border-color: transparent; }
+.card-tool[data-tool="diagnostics"] { font-family: Georgia, serif; font-style: italic; font-weight: 700; }
+.card-tool:hover { color: var(--ink); background: var(--chip); }
 .project-card.selected { background: var(--accent-light); border-color: var(--accent-border); }
 .project-card .name { font-weight: 600; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .project-card .card-detail { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 6px; gap: 8px; }
@@ -130,7 +137,7 @@ dialog::backdrop { background: #12232f55; backdrop-filter: blur(3px); }
   .brand { margin-bottom: 10px; }
   .sidebar-label, .search, .sidebar-bottom { display: none; }
   .project-list { display: flex; gap: 8px; margin: 8px 0 0; max-height: 90px; }
-  .project-card { min-width: 190px; margin: 0; }
+  .project-item { min-width: 190px; margin: 0; }
   main { padding: 14px; height: auto; }
   .project-header { display: block; }
   .actions { justify-content: flex-start; margin-top: 12px; }

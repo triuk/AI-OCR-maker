@@ -18,13 +18,12 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from .language import (IMAGE_TYPES, MISSING_CLI, UNAUTHORIZED, UNREACHABLE_SERVER, USAGE_LIMIT, Completion,
+from .language import (DEFAULT_EFFORT, IMAGE_TYPES, MISSING_CLI, UNAUTHORIZED, UNREACHABLE_SERVER, USAGE_LIMIT, Completion,
                        LanguageError, LanguageProvider, Request, child_environment, find_executable, run_process)
 
 # Offered when Codex has not cached its model list yet (~/.codex/models_cache.json).
 FALLBACK_MODELS = [{"id": "gpt-6.1-sol", "label": "GPT-6.1-Sol"}, {"id": "gpt-6-astra", "label": "GPT-6-Astra"},
                    {"id": "gpt-6.1-terra", "label": "GPT-6.1 Terra"}, {"id": "gpt-6-luna", "label": "GPT-6-Luna"}]
-EFFORT = "medium"
 LOGIN_CHECK_SECONDS = 600
 # Above this, developer instructions would not fit one command-line argument; they lead the prompt instead.
 ARGUMENT_LIMIT = 100_000
@@ -82,14 +81,16 @@ class CodexProvider(LanguageProvider):
     def default_model(self) -> str:
         return self.models()[0]["id"]
 
-    def complete(self, request: Request, *, model: str | None, stopped: Callable[[], bool]) -> Completion:
+    def complete(self, request: Request, *, model: str | None, stopped: Callable[[], bool],
+                 effort: str | None = None) -> Completion:
         executable = self._executable or find_executable("codex")
         if not executable:
             raise LanguageError(MISSING, code=MISSING_CLI)
         self._require_subscription(executable)
         with tempfile.TemporaryDirectory(prefix="ocrmaker-codex-") as scratch:
             scratch = Path(scratch)
-            command, prompt = self._command(executable, request, model or self.default_model(), scratch)
+            command, prompt = self._command(executable, request, model or self.default_model(), scratch,
+                                            effort)
             code, stdout, stderr = run_process(command, stdin=prompt, cwd=scratch, env=child_environment(),
                                                stopped=stopped, label="Codex")
             last = scratch / "answer.txt"
@@ -114,11 +115,12 @@ class CodexProvider(LanguageProvider):
             self._login_checked = time.monotonic()
 
     @staticmethod
-    def _command(executable: str, request: Request, model: str, scratch: Path) -> tuple[list[str], str]:
+    def _command(executable: str, request: Request, model: str, scratch: Path,
+                 effort: str | None = None) -> tuple[list[str], str]:
         command = [executable, "exec", "--json", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config",
                    "--ignore-rules", "--color", "never", "--sandbox", "read-only", "--cd", str(scratch),
                    "-m", model, "-o", str(scratch / "answer.txt")]
-        overrides = {**ISOLATION, "model_reasoning_effort": toml_string(EFFORT),
+        overrides = {**ISOLATION, "model_reasoning_effort": toml_string(effort or DEFAULT_EFFORT),
                      "web_search": toml_string("live" if request.web_search else "disabled")}
         prompt = request.message or "Answer as instructed."
         instructions = toml_string(request.instructions)

@@ -272,6 +272,7 @@ def test_project_settings_offer_claude_or_codex_and_their_models(client, source_
     assert [provider["id"] for provider in choices["ai_provider"]] == ["claude", "codex"]
     assert {"id": "opus", "label": "Opus"} in choices["ai_model"]["claude"]
     assert choices["ai_model"]["codex"]
+    assert [effort["id"] for effort in choices["ai_effort"]] == ["low", "medium", "high", "xhigh", "max"]
 
     settings = f"/api/projects/{project['id']}/settings"
     saved = client.put(settings, json={"ai_provider": "claude", "ai_model": "opus"}).json()["settings"]
