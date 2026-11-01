@@ -26,8 +26,19 @@ Silent errors by cause (diagnosis of 2026-11-01 on the haiku baseline, 150 silen
 same in luna). Done: text Tesseract never found (grey box p1, headline p2, "2000" p1); line-end hyphens cut
 off at p4's right edge (rounds below).
 
+0. AI read-through of the article text as a problem signal (next round; the user asked on 2026-11-01 that
+   such errors be caught automatically and left the place in the workflow to us). Today AI sees only the
+   spots local signals flag, so a wrong reading that is a plausible word never reaches it: "čárka"/"Šárka",
+   "květnu" for "května", "místo starosty" vs "místostarosty" at a cut line end, "8do". Plan: once Reading
+   order has the articles, AI reads each article's plain text (text only, cheap; line breaks and word ids
+   marked) and names the words that do not fit the sentence, with a reason; they become problem spots
+   (signal `context`) and the existing AI reconstruction decides them from the print. Context only
+   nominates, the print decides, so ADR 0001 holds. Targets ideas 1, 3 and part of 2 (about 40 silent).
+   Watch for: nominated words of the print's own typos must stay as printed (idea 7).
 1. Rest of the cut line ends on p4 (about 5 silent per config): "místo"/"starosty" and "spolu"/"pracuje" are
-   words on both sides, so `_lost_hyphens` leaves them (only the print tells); luna writes a whole word into
+   words on both sides, so `_lost_hyphens` leaves them (flagging every such pair would flag clean print like
+   "do opravených"); with the hyphen cut off, the sentence's meaning decides, which idea 0 covers, or flag
+   such a pair where the same column edge already has lost hyphens. Luna writes a whole word into
    the head's single box ("zů" -> "základní", "trvů" -> "trvání", which `split_line_break` does not see as it
    names one id); a misread continuation ("vidclně") cannot be split. Idea: split a one-id reading of a
    line-end spot too when the word ends with the continuation's reading and the head box is far too narrow
@@ -92,7 +103,8 @@ review 295 -> 275 / 284, unnecessary 5 -> 11 / 9. luna 20261101T200337 -> 202611
 Decision: kept. Problem spots are identical to the baseline on every page but p4, and p4's silent errors
 fell in all five trials; luna 20261101T220215 (131 silent off p4, mostly p6 dates losing their spaces) was
 noise, its rerun is back at 106. Geometry and unnecessary move within noise. No reference corrections.
-Next: idea 2 (lost narrow spaces with digits); luna's p6 dates ("11.2.2000" for "11. 2. 2000") belong to it.
+Next: idea 0 (AI read-through of the article text as a problem signal); then idea 2 (lost narrow spaces
+with digits), to which luna's p6 dates ("11.2.2000" for "11. 2. 2000") belong.
 
 ### 2026-11-01 dropped-regions (branch optimize/2026-11-01-dropped-regions, kept)
 Hypothesis: Tesseract's page segmentation drops whole regions (text on a screened grey background, a headline)
