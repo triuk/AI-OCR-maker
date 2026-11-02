@@ -7,6 +7,8 @@ word of a page file (ocrmaker.words) is checked for these signals:
     partial_text            far fewer characters than the word box is wide: only part of the word was read
     adjoins_empty           touches an empty word box, so it is a read fragment of a larger damaged word
     low_confidence          Tesseract's confidence is below a threshold (see THRESHOLDS)
+    damaged_edge            the word lies in a damaged edge band (binding shadow, faded or cut-close edge, see
+                            ocrmaker.edgeband) and Tesseract's confidence is below edgeband.TRUSTED_CONFIDENCE
     not_in_dictionary       missing from both the hunspell dictionary of the language and the project dictionary
     digits_in_word          digits mixed into a word, e.g. "Rychva1d" (a number with a unit, "5kg", is fine)
     implausible_diacritics  a letter the language does not have, or Czech "ě" or "ů" where Czech never puts them
@@ -33,6 +35,7 @@ import re
 import unicodedata
 from collections.abc import Callable
 
+from . import edgeband
 from .inkgaps import WORD_GAP_SHARE
 
 UNREADABLE = "unreadable"
@@ -122,10 +125,11 @@ def _median(values: list[float]) -> float | None:
 
 
 def detect(page: dict, *, language: str, unreadable_below: float, doubtful_below: float,
-           known: Callable[[str], bool] | None) -> list[dict]:
+           known: Callable[[str], bool] | None, edge_band: set[str] = frozenset()) -> list[dict]:
     """The problem spots of one page file, in its line and word order.
 
-    known tells whether a word is in the dictionaries; None skips the dictionary check.
+    known tells whether a word is in the dictionaries; None skips the dictionary check. edge_band holds the
+    ids of words in a damaged edge band (ocrmaker.edgeband).
     Each spot is {id, kind, signals, text, confidence, bbox, line}.
     """
     lines = page["lines"]
@@ -159,6 +163,8 @@ def detect(page: dict, *, language: str, unreadable_below: float, doubtful_below
                     signals.append("adjoins_empty")
                 if word["confidence"] < doubtful_below:
                     signals.append("low_confidence")
+                elif word["id"] in edge_band and word["confidence"] < edgeband.TRUSTED_CONFIDENCE:
+                    signals.append("damaged_edge")
                 if dictionary.get(word["id"]) is False:
                     signals.append("not_in_dictionary")
                 signals += character_signals(text, language)

@@ -2,9 +2,12 @@
 read-through of the page text."""
 from __future__ import annotations
 
+import numpy
 import pytest
 
 from fakes import default_provider, run_and_export
+from ocrmaker import edgeband
+from ocrmaker.pages import IDENTITY
 from ocrmaker.step import Step
 from ocrmaker.steps import implementations
 from ocrmaker.store import ProjectStore
@@ -142,11 +145,15 @@ class ScriptedOcr(Step):
         ctx.output.write_json("ocr.json", {"engine": {"name": "scripted"}, "pages": []})
 
 
-def scripted(tmp_path, pages, language=None, **settings):
-    """A workflow whose Local OCR reads the scripted pages, and its project after a run."""
+def scripted(tmp_path, pages, language=None, mark=None, **settings):
+    """A workflow whose Local OCR reads the scripted pages, and its project after a run.
+
+    mark is a rectangle (points) printed solid black into every scanned page, see pdfs.scan_pdf.
+    """
     workflow = Workflow(ProjectStore(tmp_path / "library"), steps={**implementations(), "ocr": ScriptedOcr(pages)},
                         language=language)
-    project = workflow.create(scan_pdf(tmp_path / "zpravodaj.pdf", pages=len(pages)), settings=settings or None)
+    project = workflow.create(scan_pdf(tmp_path / "zpravodaj.pdf", pages=len(pages), mark=mark),
+                              settings=settings or None)
     return workflow, workflow.run(project["id"])
 
 
@@ -226,6 +233,39 @@ def test_a_line_end_word_that_runs_on_into_the_next_line_without_a_hyphen_is_dou
     assert spots["při"]["kind"] == "doubtful" and spots["při"]["signals"] == ["joins_next_line"]
     assert "joins_next_line" in spots["sporto'"]["signals"]
     assert {text for text, spot in spots.items() if "joins_next_line" in spot["signals"]} == {"při", "sporto'"}
+
+
+SHADED_EDGE = [[("Obecní", 90.0), ("zastupitelstvo", 90.0), ("schválilo", 90.0)],
+               [("rozpočet", 97.0), ("obce", 90.0), ("na", 90.0), ("rok", 90.0)],
+               [("Zastupitelé", 80.0), ("odsouhlasili", 92.0), ("výdaje.", 95.0)]]
+
+
+def test_words_beside_a_shadowed_page_edge_are_doubtful_unless_tesseract_is_nearly_certain(tmp_path):
+    # Scripted lines start 50 pt from the left edge, 12 pt high; the shadow reaches 44 pt into the page.
+    workflow, project = scripted(tmp_path, [SHADED_EDGE], mark=(0, 0, 44, 842))
+    spots = flagged(workflow, project)
+
+    assert {text: spot["signals"] for text, spot in spots.items()} == {
+        "Obecní": ["damaged_edge"], "Zastupitelé": ["damaged_edge"]}
+    assert spots["Obecní"]["kind"] == "doubtful"
+
+
+def test_the_same_words_away_from_a_damaged_edge_are_not_flagged(tmp_path):
+    workflow, project = scripted(tmp_path, [SHADED_EDGE])
+
+    assert flagged(workflow, project) == {}
+
+
+def test_a_page_whose_print_runs_to_the_scans_edge_has_a_damaged_band_along_it():
+    # 10 px lines on a clean 600 px wide page; every line starts 5 px from the left edge.
+    lines = [{"id": f"l{row}", "bbox": [5, 20 * row, 300, 20 * row + 10],
+              "words": [{"id": f"l{row}-w{number}", "text": "slovo", "bbox": [5 + 60 * number, 20 * row,
+                                                                              55 + 60 * number, 20 * row + 10]}
+                        for number in range(5)]} for row in range(10)]
+    band = edgeband.words_in_bands({"lines": lines}, numpy.full((220, 600), 255, numpy.uint8), IDENTITY)
+
+    # The band reaches 1.5 line heights beyond the 5 px margin: only each line's first word starts in it.
+    assert band == {f"l{row}-w0" for row in range(10)}
 
 
 TWO_PAGES = [[CLEAN, [("Rych4ald", 95.0), ("", 0.0), ("obec", 20.0)]],

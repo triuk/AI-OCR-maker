@@ -12,6 +12,7 @@
     partial_text: "přečtena jen část slova",
     adjoins_empty: "navazuje na nerozpoznaný inkoust",
     low_confidence: "nízká důvěra",
+    damaged_edge: "u poškozeného okraje stránky bez plné důvěry",
     not_in_dictionary: "není ve slovníku",
     digits_in_word: "číslice uvnitř slova",
     implausible_diacritics: "nepravděpodobná diakritika",

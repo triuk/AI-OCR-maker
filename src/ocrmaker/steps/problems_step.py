@@ -36,7 +36,7 @@ from __future__ import annotations
 import time
 from collections import Counter
 
-from .. import hunspell, readthrough
+from .. import edgeband, hunspell, readthrough
 from ..language import PageRequests, request_fields
 from ..layout import LAYOUT_STEP, read_layout_page
 from ..pages import PREPARED_STEP, read_pages
@@ -91,9 +91,12 @@ class ProblemsStep(Step):
             ctx.progress(page["index"], len(pages), f"Stránka {page['index'] + 1} z {len(pages)}")
             started = time.monotonic()
             recognised = read_page(ocr, page["index"]) or {"index": page["index"], "lines": []}
+            raster = page["raster"]
+            band = edgeband.band_words(recognised, ctx.result(raster["step"]).path(raster["file"]),
+                                       raster["to_raster"]) if recognised["lines"] else set()
             spots = detect(recognised, language=language,
                            unreadable_below=thresholds["problem_unreadable_confidence"],
-                           doubtful_below=thresholds["problem_doubtful_confidence"], known=known)
+                           doubtful_below=thresholds["problem_doubtful_confidence"], known=known, edge_band=band)
             layout = read_layout_page(layout_result, page["index"]) if layout_result else None
             articles = (order_pages.get(page["index"]) or {}).get("articles")
             spots, readthrough = self._read_through(ctx, ai, recognised, layout, articles, spots)

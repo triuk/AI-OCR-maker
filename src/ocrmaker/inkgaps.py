@@ -44,7 +44,7 @@ TRUSTED_CONFIDENCE = 80
 WORD_GAP_SHARE = 0.7
 
 
-def _grey(raster: Path) -> numpy.ndarray:
+def load_grey(raster: Path) -> numpy.ndarray:
     pixmap = pymupdf.Pixmap(str(raster))
     if pixmap.alpha:
         pixmap = pymupdf.Pixmap(pixmap, 0)
@@ -268,7 +268,7 @@ def uncovered_edge_lines(recognised: dict, raster: Path, to_raster: Matrix) -> l
     covers: what Tesseract's page segmentation dropped there, typically an isolated centred page number.
 
     Rules, underlines, solid areas and ink that runs on vertically (shadows, image edges) are left out."""
-    page = _Page(_grey(raster))
+    page = _Page(load_grey(raster))
     boxes = [_pixel_box(to_raster, line["bbox"]) for line in recognised["lines"]]
     heights = sorted(box[3] - box[1] for box in boxes if box[3] > box[1])
     line = heights[len(heights) // 2] if heights else 0.015 * page.height
@@ -341,7 +341,7 @@ def _descreened(raster: Path, boxes) -> _Page:
     """The raster's ink with any print screen averaged into an even grey (see DESCREEN) and the paper level of
     every pixel measured around it (see PAPER_WINDOW), so that a grey background is paper up to its edges, not
     ink; `boxes` are the recognised lines (pixels) that give the line height."""
-    grey = _grey(raster).astype(numpy.float32)
+    grey = load_grey(raster).astype(numpy.float32)
     line = _line_height(boxes, grey.shape[0])
     size = round(DESCREEN * line)
     grey = _square(_square(grey, size, numpy.mean), size, numpy.mean)
@@ -437,4 +437,4 @@ ink_runs = _runs
 
 def load_ink(raster: Path) -> _Page:
     """The ink of one working raster, for measuring word boxes (see _Page.ink)."""
-    return _Page(_grey(raster))
+    return _Page(load_grey(raster))
