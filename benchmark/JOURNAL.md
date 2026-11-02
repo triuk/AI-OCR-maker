@@ -9,20 +9,25 @@ The latest kept trial of each configuration; every round compares against these.
 
 | Configuration | Trial | correct % | silent | geometry | order | review | unnecessary |
 |---|---|---|---|---|---|---|---|
-| claude haiku high | 20261102T161353103337Z | 95.25 | 58 | 221 | 68/642w | 286 | 11 |
-| codex gpt-6-luna high | 20261102T154216986962Z | 96.04 | 105 | 186 | 56/1362w | 164 | 3 |
-| check: claude sonnet medium | 20261102T002422 | 93.36 | 106 | 269 | 62/830w | 296 | 11 |
-| check: codex gpt-6.1-terra medium | 20261102T003002 | 96.30 | 103 | 205 | 58/735w | 142 | 0 |
+| claude haiku high | 20261102T193945014376Z | 95.57 | 57 | 214 | 67/917w | 278 | 15 |
+| codex gpt-6-luna high | 20261102T195349018645Z | 95.88 | 115 | 197 | 55/1309w | 173 | 10 |
+| check: claude sonnet medium | 20261102T204138707446Z | 95.79 | 74 | 219 | 72/541w | 310 | 35 |
+| check: codex gpt-6.1-terra medium | 20261102T204138881928Z | 97.52 | 67 | 177 | 64/930w | 136 | 1 |
 
-Scored with corrections digest of 16 reference corrections (2026-11-02; the check rows were scored with 10).
-AI time: haiku 1742 s, luna 955 s; about 1.1-1.2 M tokens each. Kept changes since the last check
-configurations: 2 (narrow-spaces 689d28e, edge-remnants e970d42); the next kept change runs the check. The check run was after the context-readthrough round, code
-ce62841 (sonnet 315 s AI, 0.4 M tokens; terra 343 s, 0.7 M). The cheap configurations have not plateaued:
-terra medium beat luna high by 55 silent and gave no unnecessary review items, and sonnet stayed near haiku.
+Scored with corrections digest of 16 reference corrections (2026-11-02). AI time: haiku 1875 s, luna 771 s;
+about 1.0-1.2 M tokens each. Kept changes since the last check configurations: 0. The check ran after the
+edge-band round, code c4cf1a1 (sonnet 298 s AI, 0.4 M tokens; terra 414 s, 0.8 M). Against the previous
+check (code ce62841, rescored with 16 corrections: sonnet 100/269/296/11, terra 102/205/142/0 silent /
+geometry / review / unnecessary), three kept changes took silent -26 in sonnet and -35 in terra and geometry
+-50 / -28; sonnet's unnecessary rose to 35, 26 of them `damaged_edge` spots it leaves unresolved though the
+OCR text was right (idea 17). The cheap configurations have not plateaued: terra medium beats luna high by
+48 silent with one unnecessary item.
 
 Noise: with identical problem spots, the pages a change does not touch still swing by up to ~25 silent in
-luna (108, 100, 131, 106 over four trials) and ~6 in haiku. Judge a change on the pages it touches (compare
-the spots files) and rerun luna when its total moves against the touched pages. Running trials in parallel
+luna (108, 100, 131, 106 over four trials) and ~6 in haiku; the same code (85165ca) gave luna 105 and 134,
+haiku 58 and 70. One baseline trial is therefore no fixed point: judge a change on the spots it touches
+(compare the findings whose ids carry the new signal or lie in the changed spots files) and, when the total
+moves against them, rerun main as well as the change. Running trials in parallel
 and `list`/`show` during a trial are safe since 3d1fe3a. Before that, opening the library deleted the staged
 results of a running trial; only the two trials of 2026-11-02 were hit, and earlier trials are complete.
 
@@ -54,11 +59,14 @@ head ends the previous column (idea 1) 1 / 1; underlined line p2 (idea 6) 0 / 1.
 findings carry a read-through note, 5 of haiku's 41. Reference corrections added: 3 (print typos p2
 "čarodejnic,", p3 "pojišťence" twice).
 
-16. Words in a damaged edge band (faded left edges p1/p5, binding shadow p2/p6, p4's cut edge) get no spot
-    even at confidence 70-97, so misreadings there stay silent (12 / 12, the largest group both configs
-    share). Idea: the problems step flags every word in a band whose paper level or ink contrast shows edge
-    damage as a doubtful reading; the edge-remnants prompt then reads it or leaves it unresolved. Expected
-    -8 to -10 silent per config, at the cost of review. Step: problems.
+17. `damaged_edge` spots whose OCR text is right become unnecessary review items when the AI will not
+    confirm them: sonnet medium 26, luna 3-6 (p6 day numbers "9." "12." in the shadow), haiku 2 (p3 bullets).
+    Ideas: the reconstruction prompt says a damaged_edge spot is a clear reading kept in doubt only by its
+    position, so a crop that shows the same letters confirms it; or skip the flag for short numbers whose
+    neighbours in the column read the same pattern. Step: reconstruct / problems.
+16. Done (round edge-band). Left over: p6-w609 lies just outside p6's right band; the two cut line-end
+    hyphens at p4's edge ("místo", "spolu", confidence 96) are not flagged (idea 1). Pages 4 and 5 are
+    nearly binary scans, so only the cut-close margin finds their band, not the paper level.
 15. Luna takes the read-through note's suggested form against clear print (names, the print's typos, case
     endings; 8 + 3 + ~6 at edges). A prompt rule failed (round note-hypothesis): the set of noted spots
     changes from run to run and luna confirms note forms at 98-99 on other spots. Ideas: do not send the
@@ -146,6 +154,32 @@ Trials: before → after per configuration, with trial ids.
 Decision: why kept or not; reference corrections added.
 Next: what the numbers suggest.
 -->
+
+### 2026-11-02 edge-band (branch optimize/2026-11-02-edge-band, kept)
+Hypothesis: words in a damaged edge band (binding shadow p2/p6, faded or cut-close edges p1/p4/p5) are
+misread by Tesseract at confidence 70-96 and get no spot, so they stay silent (12 / 12); holding words in such
+a band to confidence 96 in the problems step should remove about 11 per config at ~70 extra doubtful readings.
+Change: `edgeband` finds a band per page side from the raster, in median line heights h: the inner end of the
+last h/2 strip within 8 h whose paper level (90th percentile of grey over the text rows) is below 0.95 of the
+central half's, plus 1 h; or, when the 10th percentile of the lines' outer margins is below 2 h (print runs
+to the scan's edge), that margin plus 1.5 h. Problem detection flags words in the band below confidence 96
+as doubtful (signal `damaged_edge`). 136 new spots on this document: p1 18, p2 17, p3 16, p4 37, p5 19, p6 29.
+Trials (silent / geometry / order / review / unnecessary, correct %): haiku baseline 20261102T161353103337Z
+58/221/68-642w/286/11 95.25 and its rerun on main 20261102T201223279086Z 70/212/68-921w/255/10 95.27 ->
+20261102T193945014376Z 57/214/67-917w/278/15 95.57. luna baseline 20261102T154216986962Z
+105/186/56-1362w/164/3 96.04 and its rerun on main 20261102T201223120991Z 134/209/74-1109w/137/3 95.62 ->
+20261102T193945422575Z 118/207/55-1572w/174/9 95.66 and 20261102T195349018645Z 115/197/55-1309w/173/10 95.88.
+Decision: kept. Against the old baseline luna's total rose in both runs, but on the flagged spots silent fell
+every time (haiku -11/+0, luna -11/+6 and -11/+5) while the untouched spots moved like AI noise (names, print
+typos, foreign diacritics on spots unchanged since the baseline). The rerun of main settled it: 105 was luna's
+luckiest run; against the rerun the flagged spots lose 14 (haiku) and 17 (luna) silent. Of the 12 diagnosed
+haiku ids 11 are fixed. Cost: unnecessary +4 / +6 (p6 day numbers "9." "12.", p3 bullets "-", left unresolved),
+review +20 in luna. New silent on flagged spots in luna are edge guesses (idea 12): "135" -> "15.35",
+"trvů" kept, "W)" -> "19". No reference corrections (17 crops judged).
+Check configurations (c4cf1a1, third kept change since ce62841): sonnet 20261102T204138707446Z
+74/219/72-541w/310/35 95.79, terra 20261102T204138881928Z 67/177/64-930w/136/1 97.52.
+Next: idea 12 (luna's edge guesses, now the main edge rest), idea 17 (sonnet's 26 unnecessary edge items) or
+idea 13 (bullets, initials, noise).
 
 ### 2026-11-02 note-hypothesis (branch optimize/2026-11-02-note-hypothesis, not kept)
 Hypothesis: luna adopts the read-through note's suggested form against clearly printed letters ("Michela" ->
