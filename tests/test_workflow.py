@@ -251,6 +251,21 @@ def test_a_step_left_running_by_a_crash_is_pending_after_a_restart(make_workflow
     assert states(make_workflow(RecordingStep("import")).get(project["id"]))["import"] == "pending"
 
 
+def test_opening_the_library_keeps_the_staged_results_of_a_run_another_process_holds(library, source_pdf):
+    # A parallel benchmark trial opens the same library while a step of another trial is writing its result.
+    store = ProjectStore(library)
+    project = store.create(source_pdf, {"name": "zpravodaj"})
+    staged = store.directory(project["id"]) / "steps" / ".reconstruct-staging"
+    staged.mkdir(parents=True)
+
+    with store.run_lock(project["id"]):
+        ProjectStore(library)
+        assert staged.is_dir()
+
+    ProjectStore(library)
+    assert not staged.exists()  # with nobody holding the project, it is a crash's leftover
+
+
 def test_a_rerun_invalidates_the_step_and_every_later_step_and_runs_them_again(make_workflow, source_pdf):
     imported, ocr = RecordingStep("import"), RecordingStep("ocr", reads=("import",))
     workflow = make_workflow(imported, ocr, RecordingStep("review"))

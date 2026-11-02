@@ -47,11 +47,23 @@ class ProjectStore:
         for leftover in self.projects.glob(".*"):
             if leftover.is_dir():
                 shutil.rmtree(leftover, ignore_errors=True)
-        for leftover in self.projects.glob("*/steps/.*"):
-            if leftover.is_dir():
-                shutil.rmtree(leftover, ignore_errors=True)
-        for leftover in self.projects.glob("*/.working-*"):
-            leftover.unlink(missing_ok=True)
+        # A project a live run holds (another process on the same library, such as a parallel benchmark trial)
+        # is writing its staged results right now.
+        for directory in self.projects.iterdir():
+            if directory.name.startswith(".") or not directory.is_dir():
+                continue
+            try:
+                lock = FileLock(directory / ".run.lock").acquire()
+            except BlockingIOError:
+                continue
+            try:
+                for leftover in (directory / "steps").glob(".*"):
+                    if leftover.is_dir():
+                        shutil.rmtree(leftover, ignore_errors=True)
+                for leftover in directory.glob(".working-*"):
+                    leftover.unlink(missing_ok=True)
+            finally:
+                lock.release()
 
     # Paths -------------------------------------------------------------------------------------------
 
