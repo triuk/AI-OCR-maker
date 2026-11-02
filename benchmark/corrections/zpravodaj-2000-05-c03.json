@@ -11,5 +11,8 @@
   {"page": 4, "bbox": [552.42, 618.84, 580.5, 626.58], "text": "Církvi", "note": "the print has a plain i at the end; the reference wrote Církví"},
   {"page": 6, "bbox": [292.14, 447.12, 319.68, 453.96], "text": "Katarína", "note": "the print has í; the reference wrote i"},
   {"page": 6, "bbox": [140.22, 482.04, 169.74, 491.22], "text": "Benjamín", "note": "the print has í; the reference wrote i"},
-  {"page": 6, "bbox": [424.98, 595.26, 449.46, 602.64], "text": "Mílková", "note": "the print has í; the reference wrote i"}
+  {"page": 6, "bbox": [424.98, 595.26, 449.46, 602.64], "text": "Mílková", "note": "the print has í; the reference wrote i"},
+  {"page": 2, "bbox": [87.12, 152.64, 125.1, 161.28], "text": "čarodejnic,", "note": "the print has the typo e without háček; the reference corrected it to ě"},
+  {"page": 3, "bbox": [193.68, 137.88, 235.8, 147.42], "text": "pojišťence", "note": "the print has the typo ť (bold); the reference corrected it to tě"},
+  {"page": 3, "bbox": [448.92, 495.9, 489.24, 505.44], "text": "pojišťence", "note": "the print has the typo ť; the reference corrected it to tě"}
 ]
