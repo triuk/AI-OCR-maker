@@ -9,29 +9,45 @@ The latest kept trial of each configuration; every round compares against these.
 
 | Configuration | Trial | correct % | silent | geometry | order | review | unnecessary |
 |---|---|---|---|---|---|---|---|
-| claude haiku high | 20261101T235121 | 93.45 | 92 | 257 | 59/640w | 278 | 8 |
-| codex gpt-6-luna high | 20261101T233846 | 93.39 | 158 | 254 | 62/1179w | 163 | 1 |
+| claude haiku high | 20261102T091553204461Z | 95.43 | 71 | 209 | 69/670w | 253 | 11 |
+| codex gpt-6-luna high | 20261102T091553584124Z | 96.00 | 127 | 193 | 55/1561w | 143 | 4 |
 | check: claude sonnet medium | 20261102T002422 | 93.36 | 106 | 269 | 62/830w | 296 | 11 |
 | check: codex gpt-6.1-terra medium | 20261102T003002 | 96.30 | 103 | 205 | 58/735w | 142 | 0 |
 
-Scored with corrections digest of 10 reference corrections (2026-11-01). AI time: haiku 1895 s, luna 730 s;
-about 1.1-1.3 M tokens each. Luna's 158 holds ~25 p6 dates written without their spaces ("6.3.2000"), its
-usual noise there (idea 2); its other recent trial at this code minus the split was 143. Kept changes since
-the last check configurations: 0 (first check run, after the context-readthrough round, code ce62841;
-sonnet 315 s AI, 0.4 M tokens; terra 343 s, 0.7 M). The cheap configurations have not plateaued: terra
-medium beats luna high by 55 silent and gives no unnecessary review items, sonnet stays near haiku.
+Scored with corrections digest of 13 reference corrections (2026-11-02; the check rows were scored with 10).
+AI time: haiku 1783 s, luna 827 s; about 1.0-1.1 M tokens each. Kept changes since the last check
+configurations: 1 (narrow-spaces, code 689d28e). The check run was after the context-readthrough round, code
+ce62841 (sonnet 315 s AI, 0.4 M tokens; terra 343 s, 0.7 M). The cheap configurations have not plateaued:
+terra medium beat luna high by 55 silent and gave no unnecessary review items, and sonnet stayed near haiku.
 
 Noise: with identical problem spots, the pages a change does not touch still swing by up to ~25 silent in
 luna (108, 100, 131, 106 over four trials) and ~6 in haiku. Judge a change on the pages it touches (compare
-the spots files) and rerun luna when its total moves against the touched pages.
+the spots files) and rerun luna when its total moves against the touched pages. Running trials in parallel
+and `list`/`show` during a trial are safe since 3d1fe3a. Before that, opening the library deleted the staged
+results of a running trial; only the two trials of 2026-11-02 were hit, and earlier trials are complete.
 
 ## Open ideas
 
 Silent errors by cause (diagnosis of 2026-11-01 on the haiku baseline, 150 silent; the local causes are the
 same in luna). Done: text Tesseract never found (grey box p1, headline p2, "2000" p1); line-end hyphens cut
-off at p4's right edge; AI read-through of the page text (rounds below).
+off at p4's right edge; AI read-through of the page text; numbers merged over narrow spaces (rounds below).
 
-0. Context where the scan cut letters off (next round): at p4's cut edge "úrovn|" and "květn|" lost their
+Diagnosis of 2026-11-02 on the previous baselines (haiku 91 / luna 155 silent): edge damage together
+(ideas 0, 3 at an edge, 12) 18 / 39, narrow spaces 18 / 42 (now done), confident misreadings away from an
+edge 16 / 12, AI accepts a wrong reading away from an edge 7 / 15, line-end splits 2 / 10, degenerate split
+boxes 5 / 8, the underlined line p2 6 / 6, small bullets "-" at p3's left edge 8 / 10 (idea 13).
+
+12. AI guesses at a damaged page edge (next round; 9 haiku, 28 luna): p1 and p5 have faded or blurred left
+    edges, and p2's right edge lies in the binding's shadow. Tesseract gives an empty box or nonsense there, and
+    the AI fills in a word from the context while ignoring the visible letter remnants (the scan shows "…rvna",
+    the AI writes "května" or "dubna"). Luna accepts at 91-99, haiku at 80-85. Examples: p1-e13, p2-e17
+    ("Doc" -> "MVDr."), p5-w218. Step: reconstruct (the prompt should require the reading to match every
+    visible letter; maybe a lower acceptance where the crop touches the page edge).
+13. Small bullets "-" at p3's left edge are missing or read as "»" (8 / 10 silent), decorative vertical
+    initials on p2 (R-O-S-T) are missing or read as "„+" (3 / 3), and noise beside p6's headings is read as a
+    letter ("KULTURNÍ A", "M ZEMŘELI"; 2 / 3). Step: ocr.
+
+0. Context where the scan cut letters off: at p4's cut edge "úrovn|" and "květn|" lost their
    last letter, so only the sentence can decide ("úrovni", "května"). The read-through names them; haiku
    then proposes the right form but at 60-75 (unresolved, review), luna confirms the OCR reading at 99
    (silent). Idea: tell reconstruction that letters the print does not show (cut off at an edge) are taken
@@ -46,8 +62,8 @@ off at p4's right edge; AI read-through of the page text (rounds below).
    names one id); a misread continuation ("vidclně") cannot be split. Idea: split a one-id reading of a
    line-end spot too when the word ends with the continuation's reading and the head box is far too narrow
    for the whole word. Step: reconstruct.
-2. Lost narrow spaces with digits ("19.2.", "8do", "92let"; 19 + 3 silent): `_known` skips anything with a
-   digit and `_UNIT` takes "8do", "92let" for a number with a unit. Step: problems.
+2. Lost narrow spaces with digits: done (round narrow-spaces). Left over: "17:5." (a colon for a dot), a comma
+   for a dot ("8," for "8."); these belong to idea 3.
 3. Confident wrong Tesseract readings (35 silent: čárka/Šárka, květnu, "135", "6.2.2000", dot vs comma):
    dictionary or numeric with confidence >= 70, no signal. Step: ocr/problems; hard, needs a new signal.
 4. AI accepts a wrong reading with confidence 80-93 (10 silent, 6 of them at an edge; errors are flat across
@@ -85,6 +101,34 @@ Trials: before → after per configuration, with trial ids.
 Decision: why kept or not; reference corrections added.
 Next: what the numbers suggest.
 -->
+
+### 2026-11-02 narrow-spaces (branch optimize/2026-11-02-narrow-spaces, kept)
+Hypothesis: Tesseract merges a number with its neighbour across a narrow space ("19. 2. 2000" -> "19.2.2000",
+"8 do" -> "8do"; the scan shows a gap of 0.3-0.56 letter heights). Luna confirms such words at 98, so the
+errors stay silent. Cutting such words at the gap in Local OCR should remove most of the 18 haiku and 42 luna
+silent errors (ocr step).
+Change: `inkgaps.split_narrow_spaces` runs in Local OCR after the recovered lines and before the empty word
+boxes. It cuts a word at an ink-free gap of at least 0.25 letter heights after "." or "," or between a digit and
+a letter. Tesseract's char boxes only assign the gap to a char boundary, and a dot or comma stays left of the
+gap. A part takes its lowest char confidence, and the words are numbered again. The first version measured the
+gap between char boxes (threshold 0.33) and missed about 20 dates: the LSTM box of a dot overlaps the next char.
+The parts also kept the merged word's low confidence, which sent right parts to review (luna unnecessary 1 -> 17).
+Trials (silent / geometry / order / review / unnecessary, correct %): haiku 20261101T235121
+91/257/59-640w/278/8 93.46 -> char boxes 20261102T084146135440Z 91/243/65-635w/249/7 94.48 -> ink
+20261102T091553204461Z 71/209/69-670w/253/11 95.43. luna 20261101T233846 155/254/62-1179w/163/1 93.45 ->
+char boxes 20261102T080503181010Z 128/238/56-1515w/209/17 and 20261102T084146228339Z 150/225/52-1047w/172/8 ->
+ink 20261102T091553584124Z 127/193/55-1561w/143/4 96.00. Two more trials, haiku 20261102T080502868245Z and
+luna 20261102T082433320970Z, are void: another process opening the library deleted their staged AI
+reconstruction pages. Fixed in 3d1fe3a; trials now also record the commit they started on (ada48f8).
+Decision: kept. Silent fell 20 in haiku and 28 in luna, geometry 48 and 61, correct % up 2.0 and 2.6. On p6
+(the dates) luna's silent went 54 -> 17 and merged 55 -> 4; haiku's silent went 28 -> 11. Order words rose on p6
+in every luna trial with the cut (118 -> ~400): one run, the whole "ZEMŘELI ... SRDEČNĚ BLAHOPŘEJEME!" section
+placed at another position among the articles. The small runs inside the tables fell (39 -> 31). Haiku's order
+moved +10 runs / +30 words, within its noise. Unnecessary +3 in haiku: "říjnu" and "Církvi" are known
+read-through doubts, and "15 23." on p1 is untouched by the cut. Reference corrections added: 3 (p6 Katarína,
+Benjamín, Mílková).
+Next: idea 12 (AI guesses at a damaged page edge, 9 haiku / 28 luna), the largest group left that a generic
+rule can attack; then idea 13 (bullets and initials) or idea 3.
 
 ### 2026-11-01 context-readthrough (branch optimize/2026-11-01-context-readthrough, kept)
 Hypothesis: confident misreadings that are real words ("čárka" for "Šárka", "květnu" for "května") and lost
