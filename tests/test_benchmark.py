@@ -39,6 +39,24 @@ def test_trials_share_the_local_steps_and_are_scored_against_the_reference(tmp_p
     assert [trial["id"] for trial in benchmark.trials()] == [first["id"], second["id"]]
 
 
+def test_a_trial_records_the_commit_it_started_on(tmp_path, language_provider, monkeypatch):
+    # Trials run for many minutes; committing the next change meanwhile must not relabel the running trial.
+    head = {"commit": "1111111"}
+    monkeypatch.setattr("ocrmaker.benchmark.commit", lambda: head["commit"])
+    benchmark = Benchmark(tmp_path / "benchmark", language=language_provider)
+    benchmark.add_document("sample", *sample_document(tmp_path))
+    run = benchmark.workflow.run
+
+    def run_while_committing(project_id):
+        run(project_id)
+        head["commit"] = "2222222"
+    benchmark.workflow.run = run_while_committing
+
+    trial, = benchmark.run({"ai_provider": "claude"})
+
+    assert trial["commit"] == "1111111"
+
+
 def test_a_trial_whose_run_failed_is_recorded_as_failed_with_nothing_exported(tmp_path, language_provider):
     benchmark = Benchmark(tmp_path / "benchmark", language=language_provider)
     benchmark.add_document("sample", *sample_document(tmp_path))

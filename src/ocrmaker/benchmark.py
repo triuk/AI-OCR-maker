@@ -157,7 +157,8 @@ class Benchmark:
 
     def _trial(self, name: str, changes: dict, label: str | None) -> dict:
         settings = project_settings.merged({}, changes)
-        code = code_version()
+        # The code the trial runs is the one checked out when it starts; a commit made meanwhile is not.
+        code, revision = code_version(), commit()
         base = self._base(name, settings, code)
         trial_id = new_run_id()
         project = self.store.duplicate(base, {
@@ -170,7 +171,7 @@ class Benchmark:
         stopped = next((step for step in STEP_IDS if states[step]["state"] not in FINISHED), None)
         report = self.workflow.report(project["id"]) or {}
         record = {"trial": TRIAL_VERSION, "id": trial_id, "created": now(), "label": label, "document": name,
-                  "commit": commit(), "code": code, "settings": settings, "base": base,
+                  "commit": revision, "code": code, "settings": settings, "base": base,
                   "project": project["id"],
                   "failed": {"step": stopped, "message": states[stopped].get("message")} if stopped else None,
                   "steps": [{"id": step["id"], "state": step["state"], "duration": step["duration"],
