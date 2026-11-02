@@ -51,6 +51,20 @@ reading away from an edge 6 / 23 (ideas 4, 7), the underlined line p2 6 / 6 (ide
     readings at 80-98, right ones at 82-99). Ideas: raise the contrast of crops whose spot lies in a dark
     gradient (p2's binding shadow), and draw the red outline further off the box: at 3 px it covers the faint
     first or last letters that lie just outside the OCR box. Step: reconstruct (crops).
+14. Visual read-through with a checked candidate (user's idea; targets idea 3, 26 / 21 silent, and part of
+    ideas 4 and 13). The read-through sees only text, so misreadings that look plausible as text stay silent
+    ("135" for "11.35", "8," for "8.", "Fůgnera", "Slížková", a wrong case). Give the read-through each
+    line's image next to its OCR text; it names words that disagree with the print or the sentence and gives
+    the most likely form as a separate `candidate` field (today it is only free text in `reason`, which
+    reconstruction gets as a note that is "no evidence"). Reconstruction checks the candidate against its
+    crop: the print shows it, or does not contradict it while the context alone determines it -> accept; the
+    print shows other letters -> keep the print; the print does not decide and the context allows several
+    forms -> unresolved, with the candidate as a pre-filled suggestion for review. This keeps Tesseract the
+    source of words (ADR 0005) and AI on problem spots only (ADR 0001), so no user approval is needed, unlike
+    idea 11. Risks: tokens and time (page images; haiku already ~30 min), false flags raising unnecessary
+    review, and the same model flagging and confirming (luna confirms wrong readings at 98-99). It also covers
+    idea 0 (letters cut off at an edge, which only the sentence can decide). Step: problems (readthrough)
+    + reconstruct.
 13. Small bullets "-" at p3's left edge are missing or read as "»" (8 / 10 silent), decorative vertical
     initials on p2 (R-O-S-T) are missing or read as "„+" (3 / 3), and noise beside p6's headings is read as a
     letter ("KULTURNÍ A", "M ZEMŘELI"; 2 / 3). Step: ocr.
