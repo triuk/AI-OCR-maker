@@ -227,10 +227,10 @@ def merged_word(*pieces: tuple[str, float]) -> dict:
     for text, gap in pieces:
         for n, char in enumerate(text):
             width, top = (3, 17) if char in ".," else (6, 0)
-            chars.append({"text": char, "bbox": (x, top, x + width, 20), "confidence": 90.0})
+            chars.append({"text": char, "bbox": (x, top, x + width, 20), "confidence": 99.0 - len(chars)})
             x += width + (gap if n == len(text) - 1 else 1)
     return {"text": "".join(char["text"] for char in chars), "bbox": (0, 0, chars[-1]["bbox"][2], 20),
-            "confidence": 91.0, "chars": chars}
+            "confidence": 50.0, "chars": chars}
 
 
 @pytest.mark.parametrize("pieces, expected", [
@@ -244,7 +244,9 @@ def test_a_word_tesseract_merged_over_a_narrow_space_is_cut_there(pieces, expect
     parts = tesseract.split_narrow_spaces(merged_word(*pieces))
 
     assert [part["text"] for part in parts] == expected
-    assert all(part["bbox"][1::2] == (0, 20) and part["confidence"] == 91.0 for part in parts)
+    assert all(part["bbox"][1::2] == (0, 20) for part in parts)
+    if len(parts) > 1:  # the merged word's low confidence was the merge's; a part has its chars' lowest
+        assert [part["confidence"] for part in parts] == [part["chars"][-1]["confidence"] for part in parts]
     assert [char["text"] for part in parts for char in part["chars"]] == list("".join(expected))
     for part in parts:
         assert (part["bbox"][0], part["bbox"][2]) == (part["chars"][0]["bbox"][0], part["chars"][-1]["bbox"][2])

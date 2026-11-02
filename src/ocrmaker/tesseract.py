@@ -29,13 +29,15 @@ def _text(raw: str | None) -> str:
 
 # Tesseract reads a narrow space as none: "19. 2. 2000" becomes one word "19.2.2000", "8 do" becomes "8do". Within a
 # word, a gap after "." or "," or between a digit and a letter at least this share of the word's letter height is
-# such a space (printed narrow spaces measure 0.35-0.7 of it, the dot in a time like "16.15" at most 0.3).
+# such a space (printed narrow spaces measure 0.35-0.7 of it, the dot in a time like "16.15" at most 0.3). The merged
+# word's confidence reflects the merge, so each part takes its lowest char confidence, where Tesseract's word
+# confidence normally sits (a few points below).
 SPACE_SHARE = 0.33
 
 
 def split_narrow_spaces(word: dict) -> list[dict]:
     """The word (text, bbox, confidence, chars; boxes in display-upright pixels) cut at its narrow spaces
-    (see SPACE_SHARE); each part keeps the word's confidence and vertical extent."""
+    (see SPACE_SHARE); each part keeps the word's vertical extent and takes its lowest char confidence."""
     chars = word["chars"]
     heights = sorted(char["bbox"][3] - char["bbox"][1] for char in chars if char["text"].isalnum())
     if not heights or "".join(char["text"] for char in chars) != word["text"]:
@@ -52,7 +54,7 @@ def split_narrow_spaces(word: dict) -> list[dict]:
     parts = [chars[start:end] for start, end in zip(cuts, cuts[1:] + [len(chars)])]
     return [{"text": "".join(char["text"] for char in part),
              "bbox": (part[0]["bbox"][0], word["bbox"][1], part[-1]["bbox"][2], word["bbox"][3]),
-             "confidence": word["confidence"], "chars": part} for part in parts]
+             "confidence": min(char["confidence"] for char in part), "chars": part} for part in parts]
 
 
 class Recognizer:
