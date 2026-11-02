@@ -31,6 +31,25 @@ moves against them, rerun main as well as the change. Running trials in parallel
 and `list`/`show` during a trial are safe since 3d1fe3a. Before that, opening the library deleted the staged
 results of a running trial; only the two trials of 2026-11-02 were hit, and earlier trials are complete.
 
+## Next round (set by the user)
+
+A measurement round, no code change: does effort `xhigh` beat `high` for the two iteration models? The
+`/optimize` skill does this round instead of diagnosing (step 2) and deletes this section when done.
+
+1. Stay on a clean `main` (no branch, nothing to merge). Run, each with `--label effort-xhigh`:
+   `claude haiku xhigh` and `codex gpt-6-luna xhigh`. If the provider refuses `xhigh`, journal that and stop.
+2. Because one run of a configuration is no fixed point (Baselines, Noise), also rerun the two `high`
+   configurations on the same code with `--label effort-high-rerun`. Compare each `xhigh` trial with the
+   baseline row and its rerun together (4 trials in all; budget 6-8).
+3. Judge per class, not by one number: silent, geometry, order, review, unnecessary, AI seconds, tokens. A gain
+   counts only when it exceeds the spread between the baseline and its rerun. Give the cost of the gain: AI
+   seconds and tokens (xhigh haiku may need over an hour).
+4. Decision for the user, in the report: switch the iteration configuration to `xhigh` (record it in the
+   Baselines table and the skill's Configurations table), keep `high`, or try `claude sonnet`/`terra` at `high`
+   next. Changing the configurations is the user's decision, so ask one yes/no question.
+5. Background: the checks of round edge-band showed `codex gpt-6.1-terra medium` best (67 silent, 177 geometry,
+   1 unnecessary at about 0.67 USD per trial), but on a different effort and a single trial.
+
 ## Open ideas
 
 Silent errors by cause (diagnosis of 2026-11-01 on the haiku baseline, 150 silent; the local causes are the

@@ -17,7 +17,9 @@ Tools and score columns: `benchmark/README.md`. Memory between rounds: `benchmar
    `git status` is clean on `main`. Done when you can name the current baseline trial of each iteration
    configuration (below) and the open ideas.
 
-2. **Choose the hypothesis.** Take the worst class in priority order: silent errors (missing text included)
+2. **Choose the hypothesis.** If `benchmark/JOURNAL.md` has a section *Next round (set by the user)*, do that
+   round as written instead (no diagnosis, no branch unless it says so), then delete the section.
+   Otherwise take the worst class in priority order: silent errors (missing text included)
    → geometry and order → unnecessary review items → cost. Dispatch a general-purpose subagent to diagnose
    it; its prompt names the class, the baseline trial IDs, the scratchpad path, and says: "Follow the section
    *Diagnosis* in `.claude/skills/optimize/SKILL.md`." Stay out of the crops yourself; open one only when the
