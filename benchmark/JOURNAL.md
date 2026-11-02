@@ -9,12 +9,12 @@ The latest kept trial of each configuration; every round compares against these.
 
 | Configuration | Trial | correct % | silent | geometry | order | review | unnecessary |
 |---|---|---|---|---|---|---|---|
-| claude haiku high | 20261102T161353103337Z | 95.20 | 61 | 221 | 68/642w | 286 | 11 |
-| codex gpt-6-luna high | 20261102T154216986962Z | 96.02 | 106 | 186 | 56/1362w | 164 | 3 |
+| claude haiku high | 20261102T161353103337Z | 95.25 | 58 | 221 | 68/642w | 286 | 11 |
+| codex gpt-6-luna high | 20261102T154216986962Z | 96.04 | 105 | 186 | 56/1362w | 164 | 3 |
 | check: claude sonnet medium | 20261102T002422 | 93.36 | 106 | 269 | 62/830w | 296 | 11 |
 | check: codex gpt-6.1-terra medium | 20261102T003002 | 96.30 | 103 | 205 | 58/735w | 142 | 0 |
 
-Scored with corrections digest of 13 reference corrections (2026-11-02; the check rows were scored with 10).
+Scored with corrections digest of 16 reference corrections (2026-11-02; the check rows were scored with 10).
 AI time: haiku 1742 s, luna 955 s; about 1.1-1.2 M tokens each. Kept changes since the last check
 configurations: 2 (narrow-spaces 689d28e, edge-remnants e970d42); the next kept change runs the check. The check run was after the context-readthrough round, code
 ce62841 (sonnet 315 s AI, 0.4 M tokens; terra 343 s, 0.7 M). The cheap configurations have not plateaued:
@@ -42,6 +42,29 @@ at a damaged edge 7 / 39 (prompt fixed in round edge-remnants), confident Tesser
 15 / 12 and away from it 11 / 9 (idea 3), bullets, initials and noise 14 / 16 (idea 13), AI accepts a wrong
 reading away from an edge 6 / 23 (ideas 4, 7), the underlined line p2 6 / 6 (idea 6), degenerate split boxes
 3 / 8 (idea 5), p4 cut line ends 3 / 4 (ideas 0, 1). No reference corrections were needed in 20 crops.
+
+Diagnosis of 2026-11-02 on the edge-remnants baselines (findings, haiku 41 / luna 86): confident Tesseract
+misreadings at a faded or shadowed edge, no spot (idea 3 at an edge) 12 / 12; AI guesses at a damaged edge
+(idea 12) 2 / 24, about 6 of luna's taking the read-through note's form; confident misreadings away from an
+edge (idea 3) 8 / 7; reconstruction adopts the note's form against clear print (idea 15) 0 / 8; AI corrects
+the print's typos (idea 7) 1 / 3; AI confirms a wrong reading away from an edge (idea 4) 0 / 8; bullets,
+initials and noise (idea 13) 5 / 10; degenerate split boxes (idea 5) 6 / 4; narrow-space leftovers (idea 2)
+1 / 3; p4 cut line ends (ideas 0, 1) 2 / 4; a broken word written whole into the continuation box when the
+head ends the previous column (idea 1) 1 / 1; underlined line p2 (idea 6) 0 / 1. 33 of luna's 86 silent
+findings carry a read-through note, 5 of haiku's 41. Reference corrections added: 3 (print typos p2
+"čarodejnic,", p3 "pojišťence" twice).
+
+16. Words in a damaged edge band (faded left edges p1/p5, binding shadow p2/p6, p4's cut edge) get no spot
+    even at confidence 70-97, so misreadings there stay silent (12 / 12, the largest group both configs
+    share). Idea: the problems step flags every word in a band whose paper level or ink contrast shows edge
+    damage as a doubtful reading; the edge-remnants prompt then reads it or leaves it unresolved. Expected
+    -8 to -10 silent per config, at the cost of review. Step: problems.
+15. Luna takes the read-through note's suggested form against clear print (names, the print's typos, case
+    endings; 8 + 3 + ~6 at edges). A prompt rule failed (round note-hypothesis): the set of noted spots
+    changes from run to run and luna confirms note forms at 98-99 on other spots. Ideas: do not send the
+    suggested form to reconstruction (only the reason without a form), or a structural check as in idea 14
+    (accept a form different from the local reading only when an independent reading of the crop, made
+    without the note, gives the same letters). Step: readthrough / reconstruct.
 
 12. AI guesses at a damaged page edge, rest (haiku 3, luna 18 of the diagnosed ids still silent): p1 and p5
     have faded left edges, p2's right edge lies in the binding's shadow. The AI sees the remnants (200 dpi
@@ -123,6 +146,29 @@ Trials: before → after per configuration, with trial ids.
 Decision: why kept or not; reference corrections added.
 Next: what the numbers suggest.
 -->
+
+### 2026-11-02 note-hypothesis (branch optimize/2026-11-02-note-hypothesis, not kept)
+Hypothesis: luna adopts the read-through note's suggested form against clearly printed letters ("Michela" ->
+"Michaela", "III." -> "I.", "říjnu" -> "října", print typos corrected), because the prompt only calls the
+note "no evidence"; telling reconstruction that the form is a guess made without the print, to be given only
+when every visible letter agrees, should remove most of these (8 + 3 + ~6 luna silent; reconstruct step).
+Change: the reconstruction prompt's context rule: a note on any spot was written from the text alone; compare
+its form with the print letter by letter, the print wins on any differing letter, names and the publisher's
+typos stay as printed, and a print too faint to decide gets the print's reading at a low confidence.
+Trials (silent / geometry / order / review / unnecessary, correct %; all with 16 corrections): haiku
+20261102T161353103337Z 58/221/68-642w/286/11 95.25 -> 20261102T180400645151Z 66/217/69-704w/326/16 94.61.
+luna 20261102T154216986962Z 105/186/56-1362w/164/3 96.04 -> 20261102T180401013504Z 123/198/54-1229w/144/3
+95.80 and 20261102T181902808379Z 111/205/55-1350w/204/20 95.45.
+Decision: not kept: silent worse in all three trials, review and unnecessary up in haiku and the luna rerun.
+On noted spots luna fixed the diagnosed ids in both runs (Michela, III., říjnu, statečně, FS a) but made 14
+and 15 new note-driven errors at 94-99 on other noted spots ("pojišťence" -> "pojištěnce", "Rychvaldě" ->
+"Rychvaldů", "května" -> "květnu", "Šlížková" -> "Slížková"); noted silent 32 -> 29 / 28 in luna, 5 -> 5 in
+haiku. The rest moved against: non-noted spots 27 -> 46 / 38 in luna, 6 -> 12 in haiku (accepted at 80-88),
+and haiku left ~40 more spots unresolved. The read-through's noted set itself varies between runs, so a
+prompt shifts which noted spots fail instead of removing the failure. No reference corrections in the round
+(the diagnosis added 3 on main; the baselines above are rescored with them).
+Next: idea 16 (flag the damaged edge band, 12 / 12, local and deterministic); idea 15 needs a structural
+check rather than a prompt.
 
 ### 2026-11-02 edge-remnants (branch optimize/2026-11-02-edge-remnants, kept)
 Hypothesis: at a damaged page edge AI reconstruction sees the letter remnants in its crop but fills in a word
