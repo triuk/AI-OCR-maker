@@ -364,6 +364,72 @@ def cleared_page(recognised: dict, raster: Path, to_raster: Matrix) -> numpy.nda
     return cleared.astype(numpy.uint8)
 
 
+# Tesseract reads a narrow space as none: "19. 2. 2000" becomes one word "19.2.2000", "8 do" becomes "8do". Within a
+# word, a gap free of ink after "." or "," or between a digit and a letter at least this share of the word's letter
+# height is such a space (printed narrow spaces measure 0.28-0.56 of it, the dot in a time like "16.15" at most 0.18).
+SPACE_SHARE = 0.25
+
+
+def split_narrow_spaces(recognised: dict, raster: Path, to_raster: Matrix, to_source: Matrix) -> dict:
+    """The page file (ocrmaker.words) with every word cut at its narrow spaces (see SPACE_SHARE) and the words
+    numbered again in line order. Tesseract's char boxes only say which chars lie left of a gap; the gap itself
+    is measured on the ink, as a dot's char box often overlaps the next char. A part keeps the word's vertical
+    extent and takes its lowest char confidence (the merged word's confidence reflects the merge)."""
+    page = _descreened(raster, [_pixel_box(to_raster, line["bbox"]) for line in recognised["lines"]])
+    number, count, lines = recognised["index"] + 1, 0, []
+    for line in recognised["lines"]:
+        words = []
+        for word in line["words"]:
+            for part in _narrow_space_parts(page, word, to_raster, to_source):
+                count += 1
+                words.append({**part, "id": f"p{number}-w{count}"})
+        lines.append({**line, "words": words})
+    return {**recognised, "lines": lines}
+
+
+def _narrow_space_parts(page: _Page, word: dict, to_raster: Matrix, to_source: Matrix) -> list[dict]:
+    chars = word["chars"]
+    boxes = [_pixel_box(to_raster, char["bbox"]) for char in chars]
+    heights = sorted(box[3] - box[1] for box, char in zip(boxes, chars) if char["text"].isalnum())
+    if not heights or "".join(char["text"] for char in chars) != word["text"]:
+        return [word]
+    x0, y0, x1, y1 = _pixel_box(to_raster, word["bbox"])
+    left, right = max(0, int(x0)), min(page.width, int(numpy.ceil(x1)))
+    top, bottom = max(0, int(y0)), min(page.height, int(numpy.ceil(y1)))
+    if right <= left or bottom <= top:
+        return [word]
+    inked = page.ink(top, bottom, 0)[:, left:right].any(axis=0)
+    columns = numpy.flatnonzero(inked)
+    if not len(columns):
+        return [word]
+    least = SPACE_SHARE * heights[len(heights) // 2]
+    centres = [(box[0] + box[2]) / 2 - left for box in boxes]
+    cuts = []  # (char index, gap start, gap end) in pixels from `left`
+    ink_from, ink_to = int(columns[0]), int(columns[-1])
+    for start, end in _runs(~inked[ink_from:ink_to + 1]):
+        start, end = start + ink_from, end + ink_from
+        n = sum(1 for centre in centres if centre < (start + end) / 2)
+        while 0 < n < len(chars) and chars[n]["text"][0] in ".,":
+            n += 1  # a dot or comma ends the word before a space, never starts the next one
+        if end - start < least or not 0 < n < len(chars) or cuts and cuts[-1][0] >= n:
+            continue
+        before, after = chars[n - 1]["text"][-1], chars[n]["text"][0]
+        if after.isalnum() and (before in ".," or before.isalnum() and before.isdigit() != after.isdigit()):
+            cuts.append((n, start, end))
+    if not cuts:
+        return [word]
+    bounds = [0] + [n for n, _, _ in cuts] + [len(chars)]
+    edges = [x0] + [left + value for _, start, end in cuts for value in (start, end)] + [x1]
+    parts = []
+    for k, (first, last) in enumerate(zip(bounds, bounds[1:])):
+        part = chars[first:last]
+        bbox = apply_rect(to_source, (edges[2 * k], y0, edges[2 * k + 1], y1))
+        parts.append({**word, "text": "".join(char["text"] for char in part),
+                      "bbox": [round(value, 2) for value in bbox],
+                      "confidence": min(char["confidence"] for char in part), "chars": part})
+    return parts
+
+
 # Public access for other local measurements on the same ink (AI reconstruction's word box merges and splits).
 InkPage = _Page
 ink_runs = _runs

@@ -8,7 +8,8 @@ background and sometimes a headline; so the page is read once more with every re
 paper evened out (`inkgaps.cleared_page`), and the lines read there with RECOVERED_CONFIDENCE are added too,
 unless they are much lower than the page's lines: erasing a neighbouring line cuts off the tops or bottoms of
 letters Tesseract missed, and what is read in such a sliver is a guess (it stays an unreadable word instead).
-Then the ink gap finder adds empty word boxes for ink inside lines no word covers.
+Then words Tesseract merged over a narrow space ("19.2.2000" for "19. 2. 2000") are cut at it
+(`inkgaps.split_narrow_spaces`), and the ink gap finder adds empty word boxes for ink inside lines no word covers.
 
 The result format is described in `ocrmaker.words`; all geometry is in source page coordinates.
 """
@@ -92,6 +93,8 @@ class OcrStep(Step):
                                                   to_source=raster["to_source"])
                 recognised = _recover_edge_lines(recognizer, recognised, raster_path, raster)
                 recognised = _recover_dropped_regions(recognizer, recognised, raster_path, raster)
+                recognised = inkgaps.split_narrow_spaces(recognised, raster_path, raster["to_raster"],
+                                                         raster["to_source"])
                 recognised = inkgaps.find_empty_words(recognised, raster_path, raster["to_raster"],
                                                       raster["to_source"])
                 ctx.output.write_json(page_file(page["index"]), recognised)

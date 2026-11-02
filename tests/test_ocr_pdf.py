@@ -1,15 +1,18 @@
 """Seam 1 with real Tesseract: Run goes Import → Image preparation → Local OCR → Export into an OCR PDF."""
 from __future__ import annotations
 
+import json
 import math
 from difflib import SequenceMatcher
 
+import numpy
 import pymupdf
 import pytest
 
 from fakes import TransformingPrepare, default_provider, run_and_export
 from layout_pdfs import LEFT, RIGHT, Print, printed_pdf
-from ocrmaker import tesseract
+from ocrmaker import inkgaps
+from ocrmaker.pages import IDENTITY
 from ocrmaker.steps import implementations
 from ocrmaker.store import ProjectStore
 from ocrmaker.workflow import Workflow
@@ -220,33 +223,43 @@ def test_text_printed_on_a_halftone_grey_background_is_read(tmp_path):
     assert SequenceMatcher(None, read, expected).ratio() > 0.9, read
 
 
-def merged_word(*pieces: tuple[str, float]) -> dict:
-    """A word as Tesseract returns it, in pixels: each piece's chars 6 wide and 20 high (dots 3 by 3) with a gap of
-    1 between them, then the piece's gap before the next piece."""
-    chars, x = [], 0.0
+def merged_word_scan(path, *pieces: tuple[str, int]) -> tuple[dict, object]:
+    """A scan of one word as Tesseract merged it, and its page file (pixels = page coordinates): letters and digits
+    print as bars 12 wide and 20 high, dots and commas as 4 by 4 squares on the baseline, 2 apart, each piece then
+    followed by its gap. A dot's char box reaches into the next char, as Tesseract's LSTM boxes often do."""
+    pixels = numpy.full((60, 400), 255, dtype=numpy.uint8)
+    chars, x = [], 20
     for text, gap in pieces:
         for n, char in enumerate(text):
-            width, top = (3, 17) if char in ".," else (6, 0)
-            chars.append({"text": char, "bbox": (x, top, x + width, 20), "confidence": 99.0 - len(chars)})
-            x += width + (gap if n == len(text) - 1 else 1)
-    return {"text": "".join(char["text"] for char in chars), "bbox": (0, 0, chars[-1]["bbox"][2], 20),
+            width, top = (4, 36) if char in ".," else (12, 20)
+            pixels[top:40, x:x + width] = 0
+            reach = gap + 3 if char in ".," and n == len(text) - 1 and gap else 0
+            chars.append({"text": char, "bbox": [x, top, x + width + reach, 40], "confidence": 99.0 - len(chars)})
+            x += width + (gap if n == len(text) - 1 else 2)
+    pymupdf.Pixmap(pymupdf.csGRAY, 400, 60, pixels.tobytes(), False).save(path)
+    word = {"id": "p1-w1", "text": "".join(char["text"] for char in chars), "bbox": [20, 20, x, 40],
             "confidence": 50.0, "chars": chars}
+    return {"index": 0, "lines": [{"id": "p1-l1", "bbox": [20, 20, x, 40], "words": [word]}]}, path
 
 
 @pytest.mark.parametrize("pieces, expected", [
     ([("19.", 8), ("2.", 8), ("2000", 0)], ["19.", "2.", "2000"]),  # a date printed with narrow spaces
-    ([("8", 9), ("do", 0)], ["8", "do"]),  # a number and the next word
-    ([("16.", 5), ("15", 0)], ["16.15"]),  # a time: the dot's own gap is narrow
-    ([("5", 1), ("kg", 0)], ["5kg"]),
+    ([("8", 7), ("do", 0)], ["8", "do"]),  # a number and the next word
+    ([("16.", 3), ("15", 0)], ["16.15"]),  # a time: the dot's own gap is narrow
+    ([("5", 2), ("kg", 0)], ["5kg"]),
     ([("na", 9), ("již", 0)], ["najiž"]),  # between letters a gap is left to Tesseract (letter-spaced print)
 ])
-def test_a_word_tesseract_merged_over_a_narrow_space_is_cut_there(pieces, expected):
-    parts = tesseract.split_narrow_spaces(merged_word(*pieces))
+def test_a_word_tesseract_merged_over_a_narrow_space_is_cut_there(tmp_path, pieces, expected):
+    page, raster = merged_word_scan(tmp_path / "page.png", *pieces)
 
-    assert [part["text"] for part in parts] == expected
-    assert all(part["bbox"][1::2] == (0, 20) for part in parts)
-    if len(parts) > 1:  # the merged word's low confidence was the merge's; a part has its chars' lowest
-        assert [part["confidence"] for part in parts] == [part["chars"][-1]["confidence"] for part in parts]
-    assert [char["text"] for part in parts for char in part["chars"]] == list("".join(expected))
-    for part in parts:
-        assert (part["bbox"][0], part["bbox"][2]) == (part["chars"][0]["bbox"][0], part["chars"][-1]["bbox"][2])
+    [line] = inkgaps.split_narrow_spaces(page, raster, IDENTITY, IDENTITY)["lines"]
+
+    assert [word["text"] for word in line["words"]] == expected
+    assert [word["id"] for word in line["words"]] == [f"p1-w{n}" for n in range(1, len(expected) + 1)]
+    if len(expected) > 1:  # each part wraps its own ink (blurred by descreening) and has its chars' lowest confidence
+        for word in line["words"]:
+            last = word["chars"][-1]
+            assert word["bbox"][0] == word["chars"][0]["bbox"][0] and word["bbox"][1::2] == [20, 40]
+            assert word["bbox"][2] == pytest.approx(last["bbox"][0] + (4 if last["text"] in ".," else 12), abs=2)
+            assert word["confidence"] == last["confidence"]
+        assert json.dumps(line)
