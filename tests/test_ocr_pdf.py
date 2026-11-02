@@ -9,6 +9,7 @@ import pytest
 
 from fakes import TransformingPrepare, default_provider, run_and_export
 from layout_pdfs import LEFT, RIGHT, Print, printed_pdf
+from ocrmaker import tesseract
 from ocrmaker.steps import implementations
 from ocrmaker.store import ProjectStore
 from ocrmaker.workflow import Workflow
@@ -217,3 +218,33 @@ def test_text_printed_on_a_halftone_grey_background_is_read(tmp_path):
     read = [word["text"] for word in stored_words(workflow, project) if word["bbox"][1] > 430]
     expected = items[2].words + items[3].words
     assert SequenceMatcher(None, read, expected).ratio() > 0.9, read
+
+
+def merged_word(*pieces: tuple[str, float]) -> dict:
+    """A word as Tesseract returns it, in pixels: each piece's chars 6 wide and 20 high (dots 3 by 3) with a gap of
+    1 between them, then the piece's gap before the next piece."""
+    chars, x = [], 0.0
+    for text, gap in pieces:
+        for n, char in enumerate(text):
+            width, top = (3, 17) if char in ".," else (6, 0)
+            chars.append({"text": char, "bbox": (x, top, x + width, 20), "confidence": 90.0})
+            x += width + (gap if n == len(text) - 1 else 1)
+    return {"text": "".join(char["text"] for char in chars), "bbox": (0, 0, chars[-1]["bbox"][2], 20),
+            "confidence": 91.0, "chars": chars}
+
+
+@pytest.mark.parametrize("pieces, expected", [
+    ([("19.", 8), ("2.", 8), ("2000", 0)], ["19.", "2.", "2000"]),  # a date printed with narrow spaces
+    ([("8", 9), ("do", 0)], ["8", "do"]),  # a number and the next word
+    ([("16.", 5), ("15", 0)], ["16.15"]),  # a time: the dot's own gap is narrow
+    ([("5", 1), ("kg", 0)], ["5kg"]),
+    ([("na", 9), ("již", 0)], ["najiž"]),  # between letters a gap is left to Tesseract (letter-spaced print)
+])
+def test_a_word_tesseract_merged_over_a_narrow_space_is_cut_there(pieces, expected):
+    parts = tesseract.split_narrow_spaces(merged_word(*pieces))
+
+    assert [part["text"] for part in parts] == expected
+    assert all(part["bbox"][1::2] == (0, 20) and part["confidence"] == 91.0 for part in parts)
+    assert [char["text"] for part in parts for char in part["chars"]] == list("".join(expected))
+    for part in parts:
+        assert (part["bbox"][0], part["bbox"][2]) == (part["chars"][0]["bbox"][0], part["chars"][-1]["bbox"][2])

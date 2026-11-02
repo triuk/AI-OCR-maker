@@ -27,6 +27,34 @@ def _text(raw: str | None) -> str:
     return unicodedata.normalize("NFC", (raw or "").strip())
 
 
+# Tesseract reads a narrow space as none: "19. 2. 2000" becomes one word "19.2.2000", "8 do" becomes "8do". Within a
+# word, a gap after "." or "," or between a digit and a letter at least this share of the word's letter height is
+# such a space (printed narrow spaces measure 0.35-0.7 of it, the dot in a time like "16.15" at most 0.3).
+SPACE_SHARE = 0.33
+
+
+def split_narrow_spaces(word: dict) -> list[dict]:
+    """The word (text, bbox, confidence, chars; boxes in display-upright pixels) cut at its narrow spaces
+    (see SPACE_SHARE); each part keeps the word's confidence and vertical extent."""
+    chars = word["chars"]
+    heights = sorted(char["bbox"][3] - char["bbox"][1] for char in chars if char["text"].isalnum())
+    if not heights or "".join(char["text"] for char in chars) != word["text"]:
+        return [word]
+    least = SPACE_SHARE * heights[len(heights) // 2]
+    cuts = [0]
+    for n in range(1, len(chars)):
+        before, after = chars[n - 1]["text"][-1], chars[n]["text"][0]
+        spaced = before in ".," or before.isalnum() and before.isdigit() != after.isdigit()
+        if spaced and after.isalnum() and chars[n]["bbox"][0] - chars[n - 1]["bbox"][2] >= least:
+            cuts.append(n)
+    if len(cuts) == 1:
+        return [word]
+    parts = [chars[start:end] for start, end in zip(cuts, cuts[1:] + [len(chars)])]
+    return [{"text": "".join(char["text"] for char in part),
+             "bbox": (part[0]["bbox"][0], word["bbox"][1], part[-1]["bbox"][2], word["bbox"][3]),
+             "confidence": word["confidence"], "chars": part} for part in parts]
+
+
 class Recognizer:
     """One loaded Tesseract model; recognise any number of pages with it, then close it."""
 
@@ -97,14 +125,13 @@ class Recognizer:
                         "block": block, "paragraph": paragraph, "words": []}
                 lines.append(line)
             if iterator.IsAtBeginningOf(RIL.WORD):
-                word = {"text": _text(iterator.GetUTF8Text(RIL.WORD)),
-                        "bbox": _box(to_source, iterator.BoundingBox(RIL.WORD)),
+                word = {"text": _text(iterator.GetUTF8Text(RIL.WORD)), "bbox": iterator.BoundingBox(RIL.WORD),
                         "confidence": round(iterator.Confidence(RIL.WORD), 2), "chars": []}
                 line["words"].append(word)
             symbol = _text(iterator.GetUTF8Text(RIL.SYMBOL))
             box = iterator.BoundingBox(RIL.SYMBOL)
             if symbol and box:
-                word["chars"].append({"text": symbol, "bbox": _box(to_source, box),
+                word["chars"].append({"text": symbol, "bbox": box,
                                       "confidence": round(iterator.Confidence(RIL.SYMBOL), 2)})
             if not iterator.Next(RIL.SYMBOL):
                 break
@@ -112,10 +139,10 @@ class Recognizer:
         kept, count = [], 0
         for line in lines:
             words = []
-            for word in line["words"]:
-                if word["text"]:
-                    count += 1
-                    words.append({"id": f"p{number}-w{count}", **word})
+            for word in (part for word in line["words"] if word["text"] for part in split_narrow_spaces(word)):
+                count += 1
+                words.append({"id": f"p{number}-w{count}", **word, "bbox": _box(to_source, word["bbox"]),
+                              "chars": [{**char, "bbox": _box(to_source, char["bbox"])} for char in word["chars"]]})
             if words:
                 kept.append({"id": f"p{number}-l{len(kept) + 1}", **line, "words": words})
         return kept
