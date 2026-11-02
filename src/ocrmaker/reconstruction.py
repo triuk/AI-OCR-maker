@@ -112,12 +112,19 @@ order (line by line, left to right). Read the print there.
 Rules:
 - Answer only for the marked ids. Never change, add or mention any other word: everything outside the \
 marks is read correctly and stays as it is.
+- Read letter by letter. A reading must agree with every letter the print shows, even faint, blurred or \
+partly cut letters near the binding or a page edge: the same letters, their number, the case of the first \
+letter and the punctuation. Never put in a word that fits the sentence better but disagrees with the \
+visible letters, and never copy a word from the surrounding text. Keep every printed word inside a marked \
+box, short faint ones too ("i", "o", "s", "a"); look just outside the red outline, where the first or last \
+letters of a box often lie.
 - Give for each reading the ids it covers and the printed words for them, exactly as printed, with \
 punctuation attached as printed (a line-end hyphen stays). Never join words across lines.
 - A word broken at a line end is two readings: the part on its own line, ending with the hyphen, and the \
 rest on the next line. Give only the part on the spot's line, never the whole word, and keep the hyphen \
 even where the scan cut the line end off: for "ko" at a line end and "panou" on the next line, give "ko-". \
-A spot with the signal joins_next_line is such a line end read without its hyphen; if the print shows two \
+Likewise, a spot at a line start that continues a word broken on the line above is given as the rest \
+only: "panou", never "kopanou". A spot with the signal joins_next_line is such a line end read without its hyphen; if the print shows two \
 separate words there, give the word as printed.
 - A spot with the signal context was read clearly, but a proofreading of the text found that it does not \
 fit its sentence; its note says why. That is a reason to look closely, not evidence: read the print, and \
