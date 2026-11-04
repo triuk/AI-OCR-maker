@@ -23,8 +23,10 @@ Tools and score columns: `benchmark/README.md`. Memory between rounds: `benchmar
    → geometry and order → unnecessary review items → cost. Dispatch a general-purpose subagent to diagnose
    it; its prompt names the class, the baseline trial IDs, the scratchpad path, and says: "Follow the section
    *Diagnosis* in `.claude/skills/optimize/SKILL.md`." Stay out of the crops yourself; open one only when the
-   report leaves the mechanism unclear. Done when the journal-worthy hypothesis is one sentence naming the
-   cause, the step and the expected effect.
+   report leaves the mechanism unclear. Among the cause groups, prefer the one most scans share (faded or
+   shadowed edges, binding shadow, cut margins) over one particular to this document (its bullets, its
+   initials), even when the particular one is somewhat larger. Done when the journal-worthy hypothesis is one
+   sentence naming the cause, the step and the expected effect.
 
 3. **Gate approach changes.** A change that contradicts an ADR in `docs/adr/` or replaces how a step works
    (for example AI transcribing whole lines instead of single problem spots) goes to the user first: write
