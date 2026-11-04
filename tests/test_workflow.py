@@ -266,6 +266,22 @@ def test_opening_the_library_keeps_the_staged_results_of_a_run_another_process_h
     assert not staged.exists()  # with nobody holding the project, it is a crash's leftover
 
 
+def test_opening_the_library_keeps_a_project_another_process_is_creating(library):
+    # Two benchmark trials started at once: one copies its base while the other opens the library.
+    store = ProjectStore(library)
+    staging = store.projects / ".new-0123456789abcdef0123456789abcdef"
+    with store._staging(staging):
+        staging.mkdir()
+        ProjectStore(library)
+        assert staging.is_dir()
+        staging.rename(store.projects / "0123456789abcdef0123456789abcdef")
+
+    staging.mkdir()  # a crash's leftover: nobody holds its lock
+    ProjectStore(library)
+    assert not staging.exists()
+    assert not list(store.projects.glob(".*.lock"))
+
+
 def test_a_rerun_invalidates_the_step_and_every_later_step_and_runs_them_again(make_workflow, source_pdf):
     imported, ocr = RecordingStep("import"), RecordingStep("ocr", reads=("import",))
     workflow = make_workflow(imported, ocr, RecordingStep("review"))

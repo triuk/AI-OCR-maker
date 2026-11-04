@@ -12,6 +12,7 @@ Layout of `<root>/projects/<id>/`:
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import shutil
@@ -43,10 +44,20 @@ class ProjectStore:
         self._recover()
 
     def _recover(self) -> None:
-        # Leftovers of a crash during create, delete or a step commit are never valid projects or results.
+        # Leftovers of a crash during create, duplicate or delete are never valid projects, but a project
+        # another process is creating right now (a parallel benchmark trial) holds its staging lock.
         for leftover in self.projects.glob(".*"):
-            if leftover.is_dir():
+            if not leftover.is_dir():
+                continue
+            try:
+                lock = FileLock(self._staging_lock(leftover)).acquire()
+            except BlockingIOError:
+                continue
+            try:
                 shutil.rmtree(leftover, ignore_errors=True)
+            finally:
+                self._staging_lock(leftover).unlink(missing_ok=True)
+                lock.release()
         # A project a live run holds (another process on the same library, such as a parallel benchmark trial)
         # is writing its staged results right now.
         for directory in self.projects.iterdir():
@@ -108,8 +119,8 @@ class ProjectStore:
         """Copy the source PDF into a new project and write its project file; both appear at once or not at all."""
         project_id = uuid.uuid4().hex
         staging = self.projects / f".new-{project_id}"
-        staging.mkdir()
-        try:
+        with self._staging(staging):
+            staging.mkdir()
             copy = staging / SOURCE_FILE
             digest = hashlib.sha256()
             with Path(source).open("rb") as reader, copy.open("wb") as writer:
@@ -123,9 +134,6 @@ class ProjectStore:
                                   "sha256": digest.hexdigest()}
             write_json_atomic(staging / PROJECT_FILE, project)
             staging.rename(self.directory(project_id))
-        except BaseException:
-            shutil.rmtree(staging, ignore_errors=True)
-            raise
         return project
 
     def get(self, project_id: str) -> dict:
@@ -165,17 +173,32 @@ class ProjectStore:
         project = self.get(project_id)
         copy_id = uuid.uuid4().hex
         staging = self.projects / f".new-{copy_id}"
-        try:
+        with self._staging(staging):
             shutil.copytree(directory, staging, ignore=shutil.ignore_patterns(
                 "diagnostics", "reports", "corrections.json", ".run.lock", ".working-*"))
             created = now()
             copy = {**project, **changes, "id": copy_id, "created": created, "updated": created, "version": 1}
             write_json_atomic(staging / PROJECT_FILE, copy)
             staging.rename(self.directory(copy_id))
+        return copy
+
+    @staticmethod
+    def _staging_lock(staging: Path) -> Path:
+        return staging.with_name(staging.name + ".lock")
+
+    @contextlib.contextmanager
+    def _staging(self, staging: Path):
+        """Hold a new project's staging directory against another process's recovery while it is filled and
+        renamed into place; on any failure the directory is removed."""
+        lock = FileLock(self._staging_lock(staging)).acquire()
+        try:
+            yield
         except BaseException:
             shutil.rmtree(staging, ignore_errors=True)
             raise
-        return copy
+        finally:
+            self._staging_lock(staging).unlink(missing_ok=True)
+            lock.release()
 
     def delete(self, project_id: str) -> None:
         """Remove a project; the caller holds its run lock. A rename first makes it vanish from the list at once."""
