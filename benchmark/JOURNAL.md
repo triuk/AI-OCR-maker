@@ -30,25 +30,9 @@ haiku 58 and 70. One baseline trial is therefore no fixed point: judge a change 
 moves against them, rerun main as well as the change. Running trials in parallel
 and `list`/`show` during a trial are safe since 3d1fe3a. Before that, opening the library deleted the staged
 results of a running trial; only the two trials of 2026-11-02 were hit, and earlier trials are complete.
-
-## Next round (set by the user)
-
-A measurement round, no code change: does effort `xhigh` beat `high` for the two iteration models? The
-`/optimize` skill does this round instead of diagnosing (step 2) and deletes this section when done.
-
-1. Stay on a clean `main` (no branch, nothing to merge). Run, each with `--label effort-xhigh`:
-   `claude haiku xhigh` and `codex gpt-6-luna xhigh`. If the provider refuses `xhigh`, journal that and stop.
-2. Because one run of a configuration is no fixed point (Baselines, Noise), also rerun the two `high`
-   configurations on the same code with `--label effort-high-rerun`. Compare each `xhigh` trial with the
-   baseline row and its rerun together (4 trials in all; budget 6-8).
-3. Judge per class, not by one number: silent, geometry, order, review, unnecessary, AI seconds, tokens. A gain
-   counts only when it exceeds the spread between the baseline and its rerun. Give the cost of the gain: AI
-   seconds and tokens (xhigh haiku may need over an hour).
-4. Decision for the user, in the report: switch the iteration configuration to `xhigh` (record it in the
-   Baselines table and the skill's Configurations table), keep `high`, or try `claude sonnet`/`terra` at `high`
-   next. Changing the configurations is the user's decision, so ask one yes/no question.
-5. Background: the checks of round edge-band showed `codex gpt-6.1-terra medium` best (67 silent, 177 geometry,
-   1 unnecessary at about 0.67 USD per trial), but on a different effort and a single trial.
+Reruns of the baselines on aad2f51 (round effort-xhigh): haiku 20261104T175506874986Z 54/223/67-671w/321/28,
+luna 20261104T175507041042Z 118/196/55-1454w/139/10; haiku's review and unnecessary swing by ~40 / ~13
+between runs of the same code.
 
 ## Open ideas
 
@@ -173,6 +157,30 @@ Trials: before → after per configuration, with trial ids.
 Decision: why kept or not; reference corrections added.
 Next: what the numbers suggest.
 -->
+
+### 2026-11-04 effort-xhigh (no branch, measurement only, proposed)
+Hypothesis: effort `xhigh` instead of `high` lowers silent errors in the two iteration models without
+changing code; set by the user.
+Change: none (main aad2f51, same local steps as d77e673). Both providers accepted `xhigh`. Four trials ran
+in parallel, so AI seconds are inflated alike (luna's high rerun took 1544 s against the baseline's 771 s).
+Trials (silent / geometry / order / review / unnecessary, correct %, AI s, tokens), corrections digest
+9217c522 for all:
+haiku high baseline 20261102T193945014376Z 57/214/67-917w/278/15 95.57 1875 s 1.18 M, rerun
+20261104T175506874986Z 54/223/67-671w/321/28 94.82 1819 s 1.25 M -> xhigh 20261104T175506243730Z
+53/215/67-643w/303/27 95.38 4135 s 2.64 M.
+luna high baseline 20261102T195349018645Z 115/197/55-1309w/173/10 95.88 771 s 1.05 M, rerun
+20261104T175507041042Z 118/196/55-1454w/139/10 95.71 1544 s 0.91 M -> xhigh 20261104T175506688240Z
+98/188/54-1352w/150/4 96.68 4831 s 1.72 M.
+Silent per page (`silent` kind only; `missing` stays ~20 in all), baseline / rerun / xhigh: haiku p1 8/7/6,
+p2 7/6/7, p3 4/5/2, p4 4/7/6, p5 4/3/3, p6 10/6/9; luna p1 20/15/14, p2 12/17/16, p3 14/7/9, p4 16/19/12,
+p5 14/20/14, p6 18/20/13.
+Decision: haiku: no gain; xhigh's -1 to -4 silent is within the page-level spread of the two high runs, at
+2.2x time and tokens; keep `high`. luna: silent -17 / -20, geometry -9 / -8, unnecessary 4, best correct %
+so far, spread over p1, p4, p5, p6; beyond the 3 between the two high runs, but within luna's historical
+swing of ~25 (Noise), at 3-6x time and 1.6-1.9x tokens. Switching configurations is the user's decision.
+No reference corrections.
+Next: a second luna xhigh trial would settle whether the gain is real; then either switch luna to xhigh or
+try idea 12 / 17 / 13 at high.
 
 ### 2026-11-02 edge-band (branch optimize/2026-11-02-edge-band, kept)
 Hypothesis: words in a damaged edge band (binding shadow p2/p6, faded or cut-close edges p1/p4/p5) are
