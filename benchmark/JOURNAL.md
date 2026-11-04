@@ -10,12 +10,12 @@ The latest kept trial of each configuration; every round compares against these.
 | Configuration | Trial | correct % | silent | geometry | order | review | unnecessary |
 |---|---|---|---|---|---|---|---|
 | claude haiku high | 20261102T193945014376Z | 95.57 | 57 | 214 | 67/917w | 278 | 15 |
-| codex gpt-6-luna high | 20261102T195349018645Z | 95.88 | 115 | 197 | 55/1309w | 173 | 10 |
+| codex gpt-6-luna xhigh | 20261104T192635628267Z | 96.50 | 88 | 192 | 51/1188w | 169 | 2 |
 | check: claude sonnet medium | 20261102T204138707446Z | 95.79 | 74 | 219 | 72/541w | 310 | 35 |
 | check: codex gpt-6.1-terra medium | 20261102T204138881928Z | 97.52 | 67 | 177 | 64/930w | 136 | 1 |
 
-Scored with corrections digest of 16 reference corrections (2026-11-02). AI time: haiku 1875 s, luna 771 s;
-about 1.0-1.2 M tokens each. Kept changes since the last check configurations: 0. The check ran after the
+Scored with corrections digest of 16 reference corrections (2026-11-02). AI time: haiku 1875 s, 1.2 M tokens; luna
+xhigh 4751 s, 2.2 M tokens (luna high was 771 s, 1.0 M; switched in round effort-xhigh). Kept changes since the last check configurations: 0. The check ran after the
 edge-band round, code c4cf1a1 (sonnet 298 s AI, 0.4 M tokens; terra 414 s, 0.8 M). Against the previous
 check (code ce62841, rescored with 16 corrections: sonnet 100/269/296/11, terra 102/205/142/0 silent /
 geometry / review / unnecessary), three kept changes took silent -26 in sonnet and -35 in terra and geometry
@@ -158,7 +158,7 @@ Decision: why kept or not; reference corrections added.
 Next: what the numbers suggest.
 -->
 
-### 2026-11-04 effort-xhigh (no branch, measurement only, proposed)
+### 2026-11-04 effort-xhigh (no branch, measurement only, kept for luna)
 Hypothesis: effort `xhigh` instead of `high` lowers silent errors in the two iteration models without
 changing code; set by the user.
 Change: none (main aad2f51, same local steps as d77e673). Both providers accepted `xhigh`. Four trials ran
@@ -177,10 +177,13 @@ p5 14/20/14, p6 18/20/13.
 Decision: haiku: no gain; xhigh's -1 to -4 silent is within the page-level spread of the two high runs, at
 2.2x time and tokens; keep `high`. luna: silent -17 / -20, geometry -9 / -8, unnecessary 4, best correct %
 so far, spread over p1, p4, p5, p6; beyond the 3 between the two high runs, but within luna's historical
-swing of ~25 (Noise), at 3-6x time and 1.6-1.9x tokens. Switching configurations is the user's decision.
-No reference corrections.
-Next: a second luna xhigh trial would settle whether the gain is real; then either switch luna to xhigh or
-try idea 12 / 17 / 13 at high.
+swing of ~25 (Noise), at 3-6x time and 1.6-1.9x tokens. The user asked for a second luna xhigh trial,
+switching only if it confirmed: 20261104T192635628267Z (code 781477c, journal only) 88/192/51-1188w/169/2
+96.50, 4751 s, 2.19 M; silent kind per page p1 14, p2 7, p3 8, p4 13, p5 16, p6 10 (68). Both xhigh runs
+(98, 88) lie below both high runs (115, 118) by more than their own spread, with unnecessary 4 / 2 against
+10. Switched: the luna iteration configuration is now `xhigh` (skill and Baselines), its baseline the second
+xhigh trial; haiku stays `high`. No reference corrections.
+Next: idea 12 / 17 / 13 with the new luna baseline; a luna round now costs ~80 min.
 
 ### 2026-11-02 edge-band (branch optimize/2026-11-02-edge-band, kept)
 Hypothesis: words in a damaged edge band (binding shadow p2/p6, faded or cut-close edges p1/p4/p5) are

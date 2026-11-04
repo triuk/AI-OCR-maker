@@ -39,7 +39,7 @@ Tools and score columns: `benchmark/README.md`. Memory between rounds: `benchmar
 5. **Measure.** Run the iteration configurations, each with `--label "<topic>"`:
 
        .venv/bin/python -m ocrmaker.benchmark run --provider claude --model haiku --effort high --label …
-       .venv/bin/python -m ocrmaker.benchmark run --provider codex --model gpt-6-luna --effort high --label …
+       .venv/bin/python -m ocrmaker.benchmark run --provider codex --model gpt-6-luna --effort xhigh --label …
 
    Trials take minutes; run them in the background. Budget: 6–8 trials per session in all. On a usage limit,
    stop, journal what is measured so far and end the round. After every third kept change, also run the
@@ -81,6 +81,6 @@ Done when every crop you rendered is judged. Report back only:
 
 | Role | Configurations |
 |---|---|
-| iteration (every round) | `claude haiku high`, `codex gpt-6-luna high` |
+| iteration (every round) | `claude haiku high`, `codex gpt-6-luna xhigh` |
 | check (every third kept change) | `claude sonnet medium`, `codex gpt-6.1-terra medium` |
 | ceiling (rarely) | the reference itself was made by `gpt-6.1-sol high` over whole pages |
