@@ -28,7 +28,8 @@ luna (108, 100, 131, 106 over four trials) and ~6 in haiku; the same code (85165
 haiku 58 and 70. One baseline trial is therefore no fixed point: judge a change on the spots it touches
 (compare the findings whose ids carry the new signal or lie in the changed spots files) and, when the total
 moves against them, rerun main as well as the change. Running trials in parallel
-and `list`/`show` during a trial are safe since 3d1fe3a. Before that, opening the library deleted the staged
+and `list`/`show` during a trial are safe since 3d1fe3a; starting two at the same moment since 0d52d2c.
+Luna xhigh on main-equivalent code (round edge-crop-ink): 88 and 96 silent. Before that, opening the library deleted the staged
 results of a running trial; only the two trials of 2026-11-02 were hit, and earlier trials are complete.
 Reruns of the baselines on aad2f51 (round effort-xhigh): haiku 20261104T175506874986Z 54/223/67-671w/321/28,
 luna 20261104T175507041042Z 118/196/55-1454w/139/10; haiku's review and unnecessary swing by ~40 / ~13
@@ -83,8 +84,9 @@ findings carry a read-through note, 5 of haiku's 41. Reference corrections added
     hostů" -> "hostů") or substitutes ("odjezd:" -> "řád:", "června" -> "dubna"). Now it also cuts a line-end
     head short ("připo-" -> "při-", "spolu-" -> "spo-"). The threshold cannot separate these (luna's wrong
     readings at 80-98, right ones at 82-99). Ideas: raise the contrast of crops whose spot lies in a dark
-    gradient (p2's binding shadow), and draw the red outline further off the box: at 3 px it covers the faint
-    first or last letters that lie just outside the OCR box. Step: reconstruct (crops).
+    gradient (p2's binding shadow). Tried (round edge-crop-ink, not kept): crops showing the ink past the
+    last OCR box and an outline that clears ink fixed as many edge spots as they broke; the AI sees the
+    remnants and still reads by the sentence. Step: reconstruct (crops).
 14. Visual read-through with a checked candidate (user's idea; targets idea 3, 26 / 21 silent, and part of
     ideas 4 and 13). The read-through sees only text, so misreadings that look plausible as text stay silent
     ("135" for "11.35", "8," for "8.", "Fůgnera", "Slížková", a wrong case). Give the read-through each
@@ -157,6 +159,32 @@ Trials: before → after per configuration, with trial ids.
 Decision: why kept or not; reference corrections added.
 Next: what the numbers suggest.
 -->
+
+### 2026-11-04 edge-crop-ink (branch optimize/2026-11-04-edge-crop-padding, not kept)
+Hypothesis: at a damaged edge the AI's crop hides the ink the OCR box missed, so luna confirms or guesses a
+line end ("55" -> "54", "sportů." -> "sportů,"; edge guesses 26 luna / 6 haiku silent in the diagnosis);
+showing that ink should remove most of them (reconstruct, `render_crop`).
+Change: first (584b95c) the crop was padded with white beyond the raster so the outline no longer clamped
+onto a word at the scan's edge; that touches only 7 spots of this document (boxes within 5 px of the raster
+edge), none of them silent in any trial, so the diagnosis's mechanism was wrong: the diagnosed words lie
+28-56 px from the raster edge. The crop (a3ce556) instead cut off ink lying beyond the last OCR box: it
+ended 0.4 line heights past the boxes, and p4's second "5" lies 12-15 px past its box. The crops now reach 1
+line height beyond their ends, an outline side that would cross ink moves out by up to 0.25 line heights,
+and the outline is drawn on paper only.
+Trials (silent / geometry / order / review / unnecessary, correct %; digest 9217c522): haiku baseline
+20261102T193945014376Z 57/214/67-917w/278/15 95.57, rerun 20261104T175506874986Z 54/223, padding
+20261104T212829602877Z 53/222/67-644w/308/18 94.82 -> 20261104T220842059464Z 55/211/66-667w/274/23 95.32.
+luna baseline 20261104T192635628267Z 88/192/51-1188w/169/2 96.50, padding (a rerun of main in effect)
+20261104T212829743437Z 96/186/52-1220w/159/7 96.52 -> 20261104T220741749434Z 90/192/53-1204w/167/10 96.45.
+Decision: not kept: totals within noise in both configurations. On luna's edge spots it fixed five ("55",
+"výrobků-", "vzteklině.", "Tonerovi,", "května") and made six new ones (p5 line starts at the faded left edge
+"užíván" -> "využíván", "že tak" -> "tak", "Čejčíka" -> "Ujčíka", "stvu" -> "stvo"; p2 "ního" -> "čního"; p6
+"šéfredaktora:" losing its colon); haiku dropped "a" and "i" at faded edges and fixed only non-edge spots.
+The crops show the remnants now, but the AI still reads them by the sentence. A haiku trial started at the
+same moment as luna failed (opening the library deleted the other trial's staging copy of its base); fixed on
+main in 0d52d2c. No reference corrections (22 crops judged).
+Next: the edge rest is the AI's reading, not the crop: idea 15 (do not send the note's form) or idea 14
+(a checked candidate) rather than more crop work; idea 13 (bullets, 19 / 16) is the largest local group.
 
 ### 2026-11-04 effort-xhigh (no branch, measurement only, kept for luna)
 Hypothesis: effort `xhigh` instead of `high` lowers silent errors in the two iteration models without
