@@ -7,7 +7,7 @@ from difflib import SequenceMatcher
 import pymupdf
 import pytest
 
-from fakes import ScriptedProvider, run_and_export
+from fakes import ScriptedProvider, answer_spots, run_and_export
 from layout_pdfs import CROSSING, CROSSING_COLUMNS, CROSSING_READING, RULES, TABLE_ROWS, Print, printed_pdf
 from ocrmaker.language import LanguageError
 from ocrmaker.step import Step
@@ -205,7 +205,7 @@ def test_the_step_previews_show_blocks_by_kind_and_numbered_articles_with_arrows
 def rules_run(tmp_path_factory):
     """Two pages with headers, footers, a caption, an ad, a table and an article continued on page 2.
 
-    The scripted AI deliberately answers out of order; the rules put each group where it belongs.
+    The scripted AI deliberately answers the groups out of order; the rules put each group where it belongs.
     """
     directory = tmp_path_factory.mktemp("rules")
     provider = ScriptedProvider().on("readthrough", {"words": []})
@@ -217,7 +217,7 @@ def rules_run(tmp_path_factory):
                                           if not item.key.startswith("T-") or item.key == "T-r1"])
         if page == 1:
             return {"articles": [article(number["footer-1"], kind="footer"),
-                                 article(number["C-head"], number["caption-1"], number["C1"]),
+                                 article(number["C-head"], number["C1"], number["caption-1"]),
                                  article(number["ad-1"], kind="ad"),
                                  article(number["E1"]),
                                  article(number["header-1"], kind="header")]}
@@ -233,7 +233,7 @@ def rules_run(tmp_path_factory):
     return workflow, provider, project
 
 
-def test_headers_footers_captions_ads_and_continuations_are_placed_by_the_rules(rules_run):
+def test_headers_footers_ads_and_continuations_are_placed_by_the_rules(rules_run):
     workflow, _, project = rules_run
     assert states(project)["order"]["state"] == "done"
 
@@ -250,6 +250,27 @@ def test_headers_footers_captions_ads_and_continuations_are_placed_by_the_rules(
     assert kinds == [["header", "article", "article", "ad", "footer"], ["header", "article", "article", "footer"]]
     assert order["links"] == [{"from": "p1-a3", "to": "p2-a2"}]
     assert order["pages"][1]["articles"][1]["continues"] == "p1-a3"
+
+
+# A form whose middle row is set in small print, which Layout takes for a caption by its size alone.
+FORM = [Print("title", (40, 40, 380, 62), "Zveme Vás na běh", 16),
+        Print("organiser", (40, 70, 380, 100), "Pořadatel: Sokolská župa Těšínská ve spolupráci s místní "
+              "tělocvičnou jednotou a městem."),
+        Print("place", (40, 104, 380, 116), "Místo konání: hřiště u základní školy na sídlišti", size=8),
+        Print("money", (40, 120, 380, 170), "Zúčastnit se můžete i formou peněžního příspěvku, který zašlete "
+              "na konto pro výzkum rakoviny u spořitelny.")]
+
+
+def test_small_print_inside_an_article_stays_where_the_ai_reads_it(tmp_path):
+    # Only the AI sees whether a block Layout calls a caption by its small size really captions a picture.
+    provider = ScriptedProvider().on("readthrough", {"words": []}).on("reconstruction", answer_spots())
+    provider.on("reading_order", lambda request: {"articles": [
+        article(*(numbers_by_key(request, FORM)[item.key] for item in FORM))]})
+    workflow = Workflow(ProjectStore(tmp_path / "library"), language=provider)
+    project = run_and_export(workflow, workflow.create(printed_pdf(tmp_path / "zpravodaj.pdf", [FORM]))["id"])
+
+    assert "caption" in [kind for kind, _ in block_texts(workflow, project)]
+    assert similarity(extracted_words(workflow, project), words_of(FORM, [item.key for item in FORM])) > 0.95
 
 
 def test_layout_recognises_headers_footers_headings_captions_and_tables(rules_run):

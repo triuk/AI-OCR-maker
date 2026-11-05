@@ -7,8 +7,10 @@ article may name the previous page's article it continues. The answer is valid o
 assigned exactly once; otherwise the page gets the geometric order (Layout's numbering) and a warning.
 
 The rules are enforced locally whatever order the answer uses: headers first, an article continued from the
-previous page next, the other articles in the AI's order, ads after the articles, footers last, and within
-each group its captions after its other blocks. Tables are read row by row by their block (ocrmaker.layout).
+previous page next, the other articles in the AI's order, ads after the articles, footers last. Within a
+group the blocks keep the AI's order: Layout's kind caption only means small print, and only the AI sees
+whether it captions a picture or is a row of its article. Tables are read row by row by their block
+(ocrmaker.layout).
 
 The Reading order result (`steps/order/`) holds `order.json`:
 
@@ -20,7 +22,7 @@ The Reading order result (`steps/order/`) holds `order.json`:
         "articles": [{                        # in reading order
             "id": "p1-a1",                    # unique in the project, numbered in reading order per page
             "kind": "article",                # "article", "header", "footer" or "ad"
-            "blocks": ["p1-b3", "p1-b4"],     # layout block ids in reading order (captions last)
+            "blocks": ["p1-b3", "p1-b4"],     # layout block ids in reading order
             "continues": null}]}],            # the previous page's article id this one continues, or null
      "links": [{"from": "p1-a3", "to": "p2-a1"}]}   # articles continued across pages, in page order
 
@@ -55,7 +57,9 @@ read each article completely, through all of its columns, before the next one st
 such an article comes first on the page. Otherwise "continues" is null.
 - Running headers and footers at the page edges (page numbers, the publication name, the date) form groups \
 of kind "header" or "footer".
-- Image captions belong to the article they illustrate and go after its text.
+- A block of kind caption is set in small print. If it stands at a picture, it captions it: it belongs to \
+the article the picture illustrates and goes after its text. Otherwise it is part of its article's text: \
+read it where it stands.
 - Advertisements form groups of kind "ad"; they come after the articles. Recognise them from the image.
 - A table is one block; keep it in its article.
 - Use the kind "article" for everything else.
@@ -161,10 +165,8 @@ def compose(groups: list[dict], layout: dict, page_number: int) -> list[dict]:
     ordered = sorted(groups, key=rank)  # stable: the AI's order within each rank
     articles = []
     for position, group in enumerate(ordered, start=1):
-        numbers = [number for number in group["blocks"] if blocks[number]["kind"] != "caption"] + \
-                  [number for number in group["blocks"] if blocks[number]["kind"] == "caption"]
         articles.append({"id": f"p{page_number}-a{position}", "kind": group["kind"],
-                         "blocks": [blocks[number]["id"] for number in numbers],
+                         "blocks": [blocks[number]["id"] for number in group["blocks"]],
                          "continues": group.get("continues")})
     return articles
 
