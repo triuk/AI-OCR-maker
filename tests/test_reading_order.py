@@ -349,6 +349,32 @@ def test_a_heading_over_two_columns_does_not_take_the_first_line_of_one_column(t
     assert " ".join(text for _, text in texts).split() == words_of(BUS, ["title", "left", "right"])
 
 
+# A timetable and a bullet list: each label stands a wide gap before its text, which wraps under itself.
+TIMETABLE = [Print("time1", (40, 40, 75, 54), "11.48"),
+             Print("entry1", (100, 40, 300, 82), "Odjezd od domu s pečovatelskou službou s možností využití "
+                   "linky číslo sedm ze zastávky na rozcestí"),
+             Print("time2", (40, 85, 75, 99), "15.52"),
+             Print("entry2", (100, 85, 300, 127), "Odjezd z rozcestí k domu s pečovatelskou službou s možností "
+                   "využití linky číslo sedm ze zastávky u pošty"),
+             Print("time3", (40, 130, 75, 144), "16.03"),
+             Print("entry3", (100, 130, 300, 172), "Odjezd od domu na rozcestí s možností využití linky číslo "
+                   "sedm ze zastávky na rozcestí v Rychvaldě"),
+             Print("bullet1", (40, 190, 50, 204), "-"),
+             Print("item1", (75, 190, 300, 204), "na odboru výstavby městského úřadu"),
+             Print("bullet2", (40, 208, 50, 222), "-"),
+             Print("item2", (75, 208, 300, 222), "v pracovních dnech od osmi do šestnácti hodin")]
+
+
+def test_a_time_or_bullet_a_wide_gap_before_its_text_is_read_with_that_text(tmp_path):
+    workflow = Workflow(ProjectStore(tmp_path / "library"), language=None)
+    project = workflow.run(workflow.create(printed_pdf(tmp_path / "zpravodaj.pdf", [TIMETABLE]))["id"])
+
+    texts = [text for _, text in block_texts(workflow, project)]
+    assert " ".join(texts).split() == words_of(TIMETABLE, [item.key for item in TIMETABLE])
+    # Each row is a paragraph of its own: the label's line and the text's wrapped lines below it.
+    assert [text.split()[0] for text in texts] == ["11.48", "15.52", "16.03", "-", "-"]
+
+
 class StrayOcr(Step):
     """Local OCR that reads a printed paragraph exactly and adds the stray artefacts of a real scan below its
     last line: a speck read as "-" and a dot, each a tiny box of its own line."""
