@@ -330,6 +330,25 @@ def test_a_one_word_last_line_of_a_paragraph_stays_in_the_paragraph(tmp_path):
     assert texts[1][1].endswith("dechová hudba.")
 
 
+BUS = [Print("title", (40, 40, 300, 62), "Do nového domu již jezdí autobus", 18),
+       Print("left", (40, 63, 150, 250), "Do nového domu s pečovatelskou službou na Podlesí je od dubna zajištěno "
+             "spojení minibusy a to podle následujícího jízdního řádu."),
+       # Right under the heading, the right column starts a little higher than the left one, as on a real scan.
+       Print("right", (170, 60, 285, 250), "Linka odjíždí od domu ve dvanáct hodin ze zastávky na rozcestí a "
+             "vrací se odpoledne ze zastávky u pošty.")]
+
+
+def test_a_heading_over_two_columns_does_not_take_the_first_line_of_one_column(tmp_path):
+    # The right column's first line, narrow and within the heading's width, looked like the heading's short
+    # last line; that exception is meant for a last line Tesseract measures larger, never for smaller text.
+    workflow = Workflow(ProjectStore(tmp_path / "library"), language=None)
+    project = workflow.run(workflow.create(printed_pdf(tmp_path / "zpravodaj.pdf", [BUS]))["id"])
+
+    texts = block_texts(workflow, project)
+    assert texts[0] == ("heading", "Do nového domu již jezdí autobus")
+    assert " ".join(text for _, text in texts).split() == words_of(BUS, ["title", "left", "right"])
+
+
 class StrayOcr(Step):
     """Local OCR that reads a printed paragraph exactly and adds the stray artefacts of a real scan below its
     last line: a speck read as "-" and a dot, each a tiny box of its own line."""

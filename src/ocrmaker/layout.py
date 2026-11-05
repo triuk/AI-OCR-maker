@@ -274,11 +274,13 @@ def _chains(pieces: list[_Piece]) -> list[list[_Piece]]:
 
 def _closing_line(above: _Piece, piece: _Piece) -> bool:
     """Whether a piece looks like the short last line of the paragraph line above it: much narrower, within
-    the line's width, and no taller. Its size is then no reason to start a block: Tesseract measures the
-    letters of a line of one or two words unreliably (often at the word's full height)."""
+    the line's width, no taller, and measured larger. Its size is then no reason to start a block: Tesseract
+    measures the letters of a line of one or two words unreliably (often at the word's full height), never
+    smaller. A smaller narrow line is body text under a heading, such as one column's under a spanning one."""
     reach = above.height
     return (piece.width <= CLOSING_WIDTH * above.width and piece.box[0] >= above.box[0] - reach
-            and piece.box[2] <= above.box[2] + reach and piece.height <= SIZE_RATIO * above.height)
+            and piece.box[2] <= above.box[2] + reach and piece.height <= SIZE_RATIO * above.height
+            and None not in (above.size, piece.size) and piece.size > above.size)
 
 
 def _stray(piece: _Piece, texts: dict[str, str], body: float) -> bool:
