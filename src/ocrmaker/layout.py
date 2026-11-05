@@ -30,6 +30,7 @@ the page as displayed (`pages.display_matrix`) and stored in source page coordin
 """
 from __future__ import annotations
 
+import re
 import statistics
 from collections.abc import Iterator
 
@@ -59,6 +60,10 @@ TABLE_ROWS = 3           # a table has at least this many rows of at least two a
 CLOSING_WIDTH = 0.5      # a closing line of a paragraph is at most this share of the line above wide
 STRAY_SIZE = 2.0         # a stray artefact is at most this many body x-heights wide and high
 STRAY_REACH = 3.0        # ...and joins a block at most this many body x-heights away
+LABEL_GAP = 4.0          # a lone label joins the text right of it at most this many line heights away
+
+# A label opening a list item or a timetable row: a time, an item number or a bullet.
+LABEL = re.compile(r"\d{1,2}[.:]\d{2}|\d{1,2}[.)]|[-–•»·*]")
 
 
 def page_file(index: int) -> str:
@@ -90,12 +95,18 @@ class _Piece:
     Unlike a box height it does not depend on which letters (or Czech capitals with a caron) a line holds.
     """
 
-    def __init__(self, words: list[dict]):
+    def __init__(self, words: list[dict], text_start: int = 0):
         self.words = words  # each: {"id", "box" (display), "bbox" (source), "x_heights" [display heights]}
         self.box = union(word["box"] for word in words)
         heights = [height for word in words for height in word["x_heights"]]
         # None when the piece has no such letter (digits, capitals): its size is unknown, not small.
         self.size = statistics.median(heights) if heights else None
+        # The first word of its text: 1 after a label joined to it, whose text then starts further right.
+        self.text_start = text_start
+
+    @property
+    def text_left(self) -> float:
+        return self.words[self.text_start]["box"][0]
 
     @property
     def height(self) -> float:
@@ -149,6 +160,27 @@ def _pieces(lines: list[dict], matrix) -> list[_Piece]:
             current.append(word)
         pieces.append(_Piece(current))
     return pieces
+
+
+def _join_labels(pieces: list[_Piece], texts: dict[str, str]) -> None:
+    """Join each lone label piece (a time, an item number, a bullet) to the text it opens, in place: the nearest
+    piece right of it on its line, at most LABEL_GAP of its line heights away, at least the label's height.
+
+    A timetable's time or a list's bullet often stands a gap wider than SPLIT_GAP before its text; as a piece
+    of its own it became a block of its own, which the reading order placed away from its text."""
+    for label in [piece for piece in pieces if len(piece.words) == 1
+                  and LABEL.fullmatch(texts.get(piece.words[0]["id"], ""))]:
+        if label not in pieces:
+            continue
+        right = [piece for piece in pieces if piece is not label and piece.box[0] >= label.box[2] - 0.5
+                 and piece.box[0] - label.box[2] <= LABEL_GAP * piece.height
+                 and _overlap(label.box[1], label.box[3], piece.box[1], piece.box[3]) >= 0.5 * label.height
+                 and label.height <= SIZE_RATIO * piece.height]
+        if not right:
+            continue
+        text = min(right, key=lambda piece: piece.box[0])
+        pieces[pieces.index(text)] = _Piece(label.words + text.words, text_start=1)
+        pieces.remove(label)
 
 
 def _tables(pieces: list[_Piece], body: float, page_width: float) -> list[_Block]:
@@ -312,14 +344,21 @@ def _attach_strays(blocks: list[_Block], texts: dict[str, str], body: float) -> 
 
 
 def _paragraphs(chain: list[_Piece]) -> list[list[_Piece]]:
-    """A run of lines split into paragraphs at wider gaps, first-line indents and closing lines.
+    """A run of lines split into paragraphs at wider gaps, first-line indents, closing lines and labels.
 
     A line closes its paragraph when the next line's first word would still have fitted after it, so the
-    line break was not forced; this holds for justified and ragged text alike.
+    line break was not forced; this holds for justified and ragged text alike. A line opened by a label
+    joined to it (`_join_labels`) starts a list item or timetable row of its own.
     """
     if len(chain) < 3:
-        return [chain]
-    left = statistics.median(line.box[0] for line in chain)
+        paragraphs = [[chain[0]]]
+        for lower in chain[1:]:
+            if lower.text_start:
+                paragraphs.append([])
+            paragraphs[-1].append(lower)
+        return paragraphs
+    # Edges are those of the text: a label before a line's text (a time, a bullet) hangs out to the left.
+    left = statistics.median(line.text_left for line in chain)
     right = max(line.box[2] for line in chain)
     width = max(right - left, 1e-6)
     height = statistics.median(line.height for line in chain)
@@ -328,11 +367,11 @@ def _paragraphs(chain: list[_Piece]) -> list[list[_Piece]]:
     paragraphs = [[chain[0]]]
     for upper, lower, gap in zip(chain, chain[1:], gaps):
         wide = gap > max(1.8 * usual, usual + 0.5 * height)
-        indented = lower.box[0] - left > 0.8 * height and upper.box[0] - left < 0.4 * height
-        first = lower.words[0]["box"]
+        indented = lower.text_left - left > 0.8 * height and upper.text_left - left < 0.4 * height
+        first = lower.words[lower.text_start]["box"]
         short = right - upper.box[2] > (first[2] - first[0]) + 0.6 * height \
             and lower.box[2] - left > 0.5 * width
-        if wide or indented or short:
+        if wide or indented or short or lower.text_start:
             paragraphs.append([])
         paragraphs[-1].append(lower)
     return paragraphs
@@ -405,10 +444,11 @@ def build_page(page: dict, recognised: dict) -> dict:
     sized = [piece.size for piece in pieces if len(piece.words) > 1 and piece.size is not None] \
         or [piece.size for piece in pieces if piece.size is not None]
     body = statistics.median(sized) if sized else X_HEIGHT_SHARE * statistics.median(p.height for p in pieces)
+    texts = {word["id"]: word["text"] for line in recognised["lines"] for word in line["words"]}
     blocks = _tables(pieces, body, width)
+    _join_labels(pieces, texts)
     for chain in _chains(pieces):
         blocks.extend(_Block(paragraph) for paragraph in _paragraphs(chain))
-    texts = {word["id"]: word["text"] for line in recognised["lines"] for word in line["words"]}
     blocks = _attach_strays(blocks, texts, body)
     _kinds(blocks, body, height)
 
