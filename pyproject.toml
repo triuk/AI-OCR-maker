@@ -18,7 +18,11 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=9.2,<10", "httpx2>=2.16,<3"]
+dev = [
+    "pytest>=9.2,<10",
+    "httpx2>=2.16,<3",
+    "pypdfium2>=5,<6",
+]
 
 [project.scripts]
 ocrmaker = "ocrmaker.app:main"
