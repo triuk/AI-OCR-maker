@@ -9,12 +9,14 @@ so an optional page transform (ADR 0003: rotation through the page matrix) moves
 text layer together without touching the image, and cropping only rewrites the CropBox.
 
 The text is invisible (render mode 3) and set in a glyphless font, as Tesseract's own PDF renderer does:
-a Type0 font with Identity-H encoding whose every character id is drawn by one empty glyph of half an em.
+a Type0 font with Identity-H encoding whose every character id is drawn by one glyph of half an em, a box
+filling its advance and the em (never painted; it gives readers character boxes as tall as the word's).
 Character ids are allocated per document, one per distinct character, and a ToUnicode CMap maps each back
 to its text, so any text (Czech diacritics included) copies exactly as it was stored. Each word is set in
 the page as displayed (upright), at the height of its word box with its baseline on the box's bottom edge,
 and horizontally scaled (Tz) to the box's width. Every word ends with a space, the last word of a line
-too, so that words of consecutive lines never merge when copied, even when the lines meet on one baseline.
+too, so that words of consecutive lines never merge when copied, even when the lines meet on one baseline;
+the space spans the gap to the line's next word, so selection runs on between words without jumping.
 Line-end hyphenation stays as the words carry it (as printed).
 
 Two text strategies differ only in how characters are encoded; Export tries the second when verification
@@ -37,6 +39,9 @@ from .pages import apply_rect, display_matrix, display_size, invert, multiply, t
 FONT_NAME = "OcrText"
 GLYPH_ADVANCE = 500  # of 1000 units per em; every character has this width
 UNITS_PER_EM = 1000
+# Width of the space after a line's last word, and the least width of any space, in ems of its word.
+LINE_END_SPACE = 0.15
+MIN_SPACE = 0.01
 # Text strategies, the default first (see the module docstring).
 STRATEGIES = ("glyphless", "unicode")
 
@@ -46,8 +51,24 @@ def _table_checksum(data: bytes) -> int:
     return sum(struct.unpack(f">{len(data) // 4}I", data)) & 0xFFFFFFFF
 
 
+def _box_glyph() -> bytes:
+    """A simple glyph whose one contour is the rectangle of its advance and the em, padded to 4 bytes."""
+    points = [(0, 0), (0, UNITS_PER_EM), (GLYPH_ADVANCE, UNITS_PER_EM), (GLYPH_ADVANCE, 0)]
+    deltas = [(x - px, y - py) for (x, y), (px, py) in zip(points, [(0, 0)] + points)]
+    glyph = (struct.pack(">hhhhhHH", 1, 0, 0, GLYPH_ADVANCE, UNITS_PER_EM, len(points) - 1, 0)
+             + b"\x01" * len(points)  # every point on the curve, coordinates as full words
+             + struct.pack(f">{len(points)}h", *(dx for dx, _ in deltas))
+             + struct.pack(f">{len(points)}h", *(dy for _, dy in deltas)))
+    return glyph + b"\0" * (-len(glyph) % 4)
+
+
 def glyphless_font() -> bytes:
-    """A minimal TrueType font: .notdef and one empty glyph, both GLYPH_ADVANCE wide, ascent 1 em, descent 0."""
+    """A minimal TrueType font: .notdef and one box glyph, both GLYPH_ADVANCE wide, ascent 1 em, descent 0.
+
+    The box glyph's outline fills its advance and the em. It is never painted (the text is invisible), but
+    readers take a character's box from its glyph's outline: Chromium's PDFium gives an empty glyph a box of
+    no height on the baseline, so a click in a word's upper half landed on the line above."""
+    glyph = _box_glyph()
     name_text = FONT_NAME.encode("utf-16-be")
     records = [(1, len(name_text)), (4, len(name_text)), (6, len(name_text))]
     name = struct.pack(">HHH", 0, len(records), 6 + 12 * len(records))
@@ -57,14 +78,14 @@ def glyphless_font() -> bytes:
     cmap_format4 = struct.pack(">HHHHHHHHHHHH", 4, 24, 0, 2, 2, 0, 0, 0xFFFF, 0, 0xFFFF, 1, 0)
     tables = {
         b"cmap": struct.pack(">HHHHI", 0, 1, 3, 1, 12) + cmap_format4,
-        b"glyf": b"",
+        b"glyf": glyph,
         b"head": struct.pack(">IIIIHHqqhhhhHHhhh", 0x00010000, 0x00010000, 0, 0x5F0F3CF5, 0x000B,
                              UNITS_PER_EM, 0, 0, 0, 0, GLYPH_ADVANCE, UNITS_PER_EM, 0, 3, 2, 0, 0),
-        b"hhea": struct.pack(">IhhhHhhhhhhhhhhhH", 0x00010000, UNITS_PER_EM, 0, 0, GLYPH_ADVANCE, 0, 0, 0,
-                             1, 0, 0, 0, 0, 0, 0, 0, 2),
+        b"hhea": struct.pack(">IhhhHhhhhhhhhhhhH", 0x00010000, UNITS_PER_EM, 0, 0, GLYPH_ADVANCE, 0, 0,
+                             GLYPH_ADVANCE, 1, 0, 0, 0, 0, 0, 0, 0, 2),
         b"hmtx": struct.pack(">HhHh", GLYPH_ADVANCE, 0, GLYPH_ADVANCE, 0),
-        b"loca": struct.pack(">HHH", 0, 0, 0),
-        b"maxp": struct.pack(">IHHHHHHHHHHHHHH", 0x00010000, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0),
+        b"loca": struct.pack(">HHH", 0, 0, len(glyph) // 2),  # short offsets: .notdef empty, glyph 1 the box
+        b"maxp": struct.pack(">IHHHHHHHHHHHHHH", 0x00010000, 2, 4, 1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0),
         b"name": name,
         b"post": struct.pack(">IIhhIIIII", 0x00030000, 0, 0, 0, 0, 0, 0, 0, 0),
     }
@@ -164,17 +185,22 @@ def _text_layer(font: _Font, page: dict, lines: list[list[dict]], resource: str)
     to_user = multiply(multiply(upright_to_display, invert(display)), invert(page["pdf_to_source"]))
     out = [f"q {_matrix(to_user)} cm BT 3 Tr"]
     for line in lines:
-        for word in line:
-            # Every word, the last of a line included, ends with a space: words of consecutive lines that meet
-            # on one baseline (one printed line split by OCR, say) must not merge when the text is copied.
-            text = word["text"] + " "
-            x0, y0, x1, y1 = apply_rect(display, word["bbox"])
+        boxes = [apply_rect(display, word["bbox"]) for word in line]
+        for number, (word, (x0, y0, x1, y1)) in enumerate(zip(line, boxes)):
             size = y1 - y0
             if size <= 0 or x1 <= x0 or not word["text"]:
                 continue
+            # Every word, the last of a line included, ends with a space: words of consecutive lines that meet
+            # on one baseline (one printed line split by OCR, say) must not merge when the text is copied.
+            # The space spans the gap to the line's next word, so a click between two words selects the
+            # space and none of them overlaps a neighbour; at a line end it is a sliver.
+            gap = boxes[number + 1][0] - x1 if number + 1 < len(boxes) else LINE_END_SPACE * size
+            space = max(gap, MIN_SPACE * size)
             scale = 100 * (x1 - x0) / (len(word["text"]) * size * GLYPH_ADVANCE / UNITS_PER_EM)
+            space_scale = 100 * space / (size * GLYPH_ADVANCE / UNITS_PER_EM)
             out.append(f"/{resource} {_number(size)} Tf {_number(scale)} Tz "
-                       f"1 0 0 1 {_number(x0)} {_number(height - y1)} Tm <{font.encode(text)}> Tj")
+                       f"1 0 0 1 {_number(x0)} {_number(height - y1)} Tm <{font.encode(word['text'])}> Tj "
+                       f"{_number(space_scale)} Tz <{font.encode(' ')}> Tj")
     out.append("ET Q")
     return "\n".join(out).encode("ascii")
 

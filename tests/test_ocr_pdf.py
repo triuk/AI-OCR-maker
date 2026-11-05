@@ -7,6 +7,8 @@ from difflib import SequenceMatcher
 
 import numpy
 import pymupdf
+import pypdfium2 as pdfium
+import pypdfium2.raw as pdfium_raw
 import pytest
 
 from fakes import TransformingPrepare, default_provider, run_and_export
@@ -81,6 +83,58 @@ def test_every_extracted_word_lies_in_its_word_box_and_copies_exactly_as_stored(
     assert any(set(word["text"]) & set("ěščřžýáíéůú") for word in stored)
     for (text, box), word in zip(extracted, stored):
         assert tuple(box) == pytest.approx(word["bbox"], abs=0.5), text
+
+
+def pdfium_chars(path, words: list[dict]) -> tuple[pdfium.PdfPage, pdfium.PdfTextPage, list[range]]:
+    """Chromium's PDF engine's view of page 1: its text page and each stored word's char indices in it."""
+    page = pdfium.PdfDocument(path)[0]
+    text_page = page.get_textpage()
+    text = text_page.get_text_range()
+    spans, position = [], 0
+    for word in words:
+        start = text.index(word["text"], position)
+        spans.append(range(start, start + len(word["text"])))
+        position = spans[-1].stop
+    return page, text_page, spans
+
+
+def char_at(page, text_page, x: float, y: float) -> int:
+    """The char Chromium's PDF engine picks at a point of the page (source page coordinates, y downwards)."""
+    return pdfium_raw.FPDFText_GetCharIndexAtPos(text_page, x, page.get_height() - y, 2, 2)
+
+
+@pytest.mark.parametrize("height", [0.15, 0.5, 0.9])
+def test_a_click_anywhere_in_a_word_box_lands_on_that_word_in_chromium(columns, height):
+    # Selection in Chromium starts and ends at the char under the pointer; a char box only on its baseline
+    # made a click in a word's upper half land on the line above.
+    workflow, project, _ = columns
+    words = stored_words(workflow, project)
+    [output] = [item for item in workflow.outputs(project["id"]) if item["name"].endswith(".pdf")]
+    page, text_page, spans = pdfium_chars(workflow.output(project["id"], output["name"]), words)
+
+    missed = []
+    for word, span in zip(words, spans):
+        x0, y0, x1, y1 = word["bbox"]
+        if char_at(page, text_page, (x0 + x1) / 2, y0 + height * (y1 - y0)) not in span:
+            missed.append(word["text"])
+    assert missed == []
+
+
+def test_a_click_between_two_words_of_a_line_lands_on_the_space_between_them_in_chromium(columns):
+    workflow, project, _ = columns
+    overlay = workflow.overlay(project["id"], "ocr", 0)
+    words = overlay["words"]
+    [output] = [item for item in workflow.outputs(project["id"]) if item["name"].endswith(".pdf")]
+    page, text_page, spans = pdfium_chars(workflow.output(project["id"], output["name"]), words)
+
+    pairs = [(first, second, span) for (first, span), (second, _) in zip(zip(words, spans), zip(words[1:], spans[1:]))
+             if second["bbox"][0] - first["bbox"][2] > 2 and second["bbox"][1] < first["bbox"][3]
+             and first["bbox"][1] < second["bbox"][3]]
+    assert len(pairs) > 20
+    for first, second, span in pairs:
+        x = (first["bbox"][2] + second["bbox"][0]) / 2
+        y = (max(first["bbox"][1], second["bbox"][1]) + min(first["bbox"][3], second["bbox"][3])) / 2
+        assert char_at(page, text_page, x, y) == span.stop, (first["text"], second["text"])
 
 
 def scan_images(document: pymupdf.Document) -> list[tuple]:
