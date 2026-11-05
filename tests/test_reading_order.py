@@ -349,6 +349,25 @@ def test_a_heading_over_two_columns_does_not_take_the_first_line_of_one_column(t
     assert " ".join(text for _, text in texts).split() == words_of(BUS, ["title", "left", "right"])
 
 
+# The headings of two articles side by side, a narrow gap apart, set in different sizes.
+NEIGHBOURS = [Print("carnival", (40, 40, 172, 60), "Karnevalové show 2000", 13),
+              Print("vaccination", (180, 38, 345, 60), "Povinné očkování psů", 18),
+              Print("carnival text", (40, 66, 160, 200), "V mateřské škole se konal dětský karneval, na který "
+                    "se převlékly do masek i paní učitelky."),
+              Print("vaccination text", (180, 66, 345, 200), "Oznamujeme občanům, že v úterý proběhne hromadné "
+                    "očkování psů starších tří měsíců proti vzteklině.")]
+
+
+def test_two_headings_side_by_side_in_different_sizes_are_blocks_of_their_own(tmp_path):
+    # Tesseract reads both headings as one line; the gap between them is narrow for their size, but the size
+    # changes there, so they are two headings.
+    workflow = Workflow(ProjectStore(tmp_path / "library"), language=None)
+    project = workflow.run(workflow.create(printed_pdf(tmp_path / "zpravodaj.pdf", [NEIGHBOURS]))["id"])
+
+    texts = [text for _, text in block_texts(workflow, project)]
+    assert "Karnevalové show 2000" in texts and "Povinné očkování psů" in texts
+
+
 # A timetable and a bullet list: each label stands a wide gap before its text, which wraps under itself.
 TIMETABLE = [Print("time1", (40, 40, 75, 54), "11.48"),
              Print("entry1", (100, 40, 300, 82), "Odjezd od domu s pečovatelskou službou s možností využití "
@@ -373,6 +392,33 @@ def test_a_time_or_bullet_a_wide_gap_before_its_text_is_read_with_that_text(tmp_
     assert " ".join(texts).split() == words_of(TIMETABLE, [item.key for item in TIMETABLE])
     # Each row is a paragraph of its own: the label's line and the text's wrapped lines below it.
     assert [text.split()[0] for text in texts] == ["11.48", "15.52", "16.03", "-", "-"]
+
+
+# A programme of dates and a form of labels: a key column of short entries, each a wide gap before its text.
+PROGRAMME = [Print("date1", (40, 40, 100, 54), "2. a 3. 5."),
+             Print("event1", (100, 40, 330, 68), "Výprodej záclon od devíti do sedmnácti hodin v předsálí "
+                   "kulturního střediska"),
+             Print("date2", (40, 72, 100, 86), "12. 5."),
+             Print("event2", (100, 72, 330, 86), "Besídka základní školy ke svátku matek"),
+             Print("date3", (40, 90, 100, 104), "22. a 23. 5."),
+             Print("event3", (100, 90, 330, 118), "Výprodej textilu od devíti do sedmnácti hodin ve velkém "
+                   "sále"),
+             Print("key1", (40, 140, 110, 154), "Pořadatel:"),
+             Print("value1", (120, 140, 330, 168), "Sokolská župa Těšínská ve spolupráci s místní "
+                   "tělocvičnou jednotou"),
+             Print("key2", (40, 172, 110, 186), "Termín:"),
+             Print("value2", (120, 172, 330, 186), "Pátek devatenáctého května v šestnáct hodin"),
+             Print("key3", (40, 190, 110, 204), "Místo konání:"),
+             Print("value3", (120, 190, 330, 204), "Hřiště u základní školy na sídlišti")]
+
+
+def test_a_column_of_dates_or_form_labels_is_read_row_by_row_with_the_text_beside_it(tmp_path):
+    workflow = Workflow(ProjectStore(tmp_path / "library"), language=None)
+    project = workflow.run(workflow.create(printed_pdf(tmp_path / "zpravodaj.pdf", [PROGRAMME]))["id"])
+
+    texts = [text for _, text in block_texts(workflow, project)]
+    assert " ".join(texts).split() == words_of(PROGRAMME, [item.key for item in PROGRAMME])
+    assert [text.split()[0] for text in texts] == ["2.", "12.", "22.", "Pořadatel:", "Termín:", "Místo"]
 
 
 class StrayOcr(Step):

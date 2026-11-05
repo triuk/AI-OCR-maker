@@ -49,6 +49,7 @@ X_HEIGHT_SHARE = 0.45    # x-height assumed from a line's box height when it has
 
 # Tuning. Gaps are in line heights; sizes are relative to the page's body text (its median x-height).
 SPLIT_GAP = 1.5          # a gap wider than this many line heights splits a line into pieces
+SIZE_GAP = 0.5           # ...and so does a narrower one, wider than this, where the text size changes
 CHAIN_GAP = 1.0          # pieces further apart vertically than this start a new block
 SIZE_RATIO = 1.2         # pieces whose sizes differ more than this never share a block
 HEADING_SIZE = 1.3       # a block at least this much larger than body text is a heading
@@ -60,7 +61,10 @@ TABLE_ROWS = 3           # a table has at least this many rows of at least two a
 CLOSING_WIDTH = 0.5      # a closing line of a paragraph is at most this share of the line above wide
 STRAY_SIZE = 2.0         # a stray artefact is at most this many body x-heights wide and high
 STRAY_REACH = 3.0        # ...and joins a block at most this many body x-heights away
-LABEL_GAP = 4.0          # a lone label joins the text right of it at most this many line heights away
+LABEL_GAP = 6.0          # a label joins the text right of it at most this many line heights away
+LABEL_SIZE = 1.5         # ...and at most this much taller (accents and capitals make a short label tall)
+KEY_WORDS = 6            # a key of a key column (a date, a time range, "Termín:") has at most this many words
+KEY_REACH = 4.0          # ...and another key lining up with it lies at most this many text lines away
 
 # A label opening a list item or a timetable row: a time, an item number or a bullet.
 LABEL = re.compile(r"\d{1,2}[.:]\d{2}|\d{1,2}[.)]|[-–•»·*]")
@@ -101,7 +105,7 @@ class _Piece:
         heights = [height for word in words for height in word["x_heights"]]
         # None when the piece has no such letter (digits, capitals): its size is unknown, not small.
         self.size = statistics.median(heights) if heights else None
-        # The first word of its text: 1 after a label joined to it, whose text then starts further right.
+        # The first word of its text: after a joined label's words, its text starts further right.
         self.text_start = text_start
 
     @property
@@ -155,32 +159,113 @@ def _pieces(lines: list[dict], matrix) -> list[_Piece]:
         current = [words[0]]
         for word in words[1:]:
             if word["box"][0] - current[-1]["box"][2] > SPLIT_GAP * height:
-                pieces.append(_Piece(current))
+                pieces.extend(_Piece(part) for part in _size_parts(current))
                 current = []
             current.append(word)
-        pieces.append(_Piece(current))
+        pieces.extend(_Piece(part) for part in _size_parts(current))
     return pieces
 
 
-def _join_labels(pieces: list[_Piece], texts: dict[str, str]) -> None:
-    """Join each lone label piece (a time, an item number, a bullet) to the text it opens, in place: the nearest
-    piece right of it on its line, at most LABEL_GAP of its line heights away, at least the label's height.
+def _size_parts(words: list[dict]) -> list[list[dict]]:
+    """Words of a line piece split where the text size changes at a gap wider than a word space: two headings
+    side by side in different sizes, which Tesseract reads as one line a gap too narrow for SPLIT_GAP apart.
 
-    A timetable's time or a list's bullet often stands a gap wider than SPLIT_GAP before its text; as a piece
-    of its own it became a block of its own, which the reading order placed away from its text."""
-    for label in [piece for piece in pieces if len(piece.words) == 1
-                  and LABEL.fullmatch(texts.get(piece.words[0]["id"], ""))]:
-        if label not in pieces:
+    Each side holds at least two words, and both their median x-height and their tallest word's height differ
+    by more than SIZE_RATIO (character boxes alone are noisy: a body line's words measure 4.7 and 8.6, and short
+    words like "s" have no ascender); the gap is wider than SIZE_GAP line heights and half again the word spaces
+    on either side."""
+    height = statistics.median(word["box"][3] - word["box"][1] for word in words)
+    gaps = [right["box"][0] - left["box"][2] for left, right in zip(words, words[1:])]
+    best = None
+    for position in range(2, len(words) - 1):
+        gap = gaps[position - 1]
+        spaces = max(statistics.median(gaps[:position - 1]), statistics.median(gaps[position:]))
+        if gap <= SIZE_GAP * height or gap <= 1.5 * spaces:
             continue
-        right = [piece for piece in pieces if piece is not label and piece.box[0] >= label.box[2] - 0.5
-                 and piece.box[0] - label.box[2] <= LABEL_GAP * piece.height
-                 and _overlap(label.box[1], label.box[3], piece.box[1], piece.box[3]) >= 0.5 * label.height
-                 and label.height <= SIZE_RATIO * piece.height]
-        if not right:
+        parts = (words[:position], words[position:])
+        sides = [[h for word in part for h in word["x_heights"]] for part in parts]
+        if not all(sides):
             continue
-        text = min(right, key=lambda piece: piece.box[0])
-        pieces[pieces.index(text)] = _Piece(label.words + text.words, text_start=1)
-        pieces.remove(label)
+
+        def ratio(values: list[float]) -> float:
+            low, high = sorted(values)
+            return high / max(low, 1e-6)
+        x_ratio = ratio([statistics.median(side) for side in sides])
+        box_ratio = ratio([max(word["box"][3] - word["box"][1] for word in part) for part in parts])
+        if x_ratio > SIZE_RATIO and box_ratio > SIZE_RATIO and (best is None or x_ratio > best[0]):
+            best = (x_ratio, position)
+    if best is None:
+        return [words]
+    return _size_parts(words[:best[1]]) + _size_parts(words[best[1]:])
+
+
+def _text_beside(label: _Piece, pieces: list[_Piece]) -> _Piece | None:
+    """The nearest piece right of a label on its line, at most LABEL_GAP of its line heights away and not
+    much smaller than the label (a heading's word beside body text is no label), or None."""
+    right = [piece for piece in pieces if piece is not label and piece.box[0] >= label.box[2] - 0.5
+             and piece.box[0] - label.box[2] <= LABEL_GAP * piece.height
+             and _overlap(label.box[1], label.box[3], piece.box[1], piece.box[3]) >= 0.5 * label.height
+             and label.height <= LABEL_SIZE * piece.height]
+    return min(right, key=lambda piece: piece.box[0]) if right else None
+
+
+def _join_labels(pieces: list[_Piece], texts: dict[str, str]) -> None:
+    """Join each label piece to the text it opens, in place: the text beside it (`_text_beside`).
+
+    A label is a lone time, item number or bullet (LABEL), or a key: at most KEY_WORDS words with a digit or
+    ending in a colon (a date, a time range, a form's "Termín:"). A key joins only in a key column, where
+    another key within KEY_REACH line heights lines up with it and so do their texts; two columns of text side
+    by side never line up so. Such a label stands a gap wider than SPLIT_GAP before its text; as a piece of its
+    own it became a block of its own, and the reading order read the labels apart from their texts."""
+    def keyed(words: list[dict]) -> bool:
+        text = " ".join(texts.get(word["id"], "") for word in words).strip()
+        return len(words) <= KEY_WORDS and (any(char.isdigit() for char in text) or text.endswith(":"))
+
+    pairs = []
+    for label in pieces:
+        lone = len(label.words) == 1 and LABEL.fullmatch(texts.get(label.words[0]["id"], "").strip()) is not None
+        beside = _text_beside(label, pieces) if lone or keyed(label.words) else None
+        if beside is not None:
+            pairs.append((label, beside, lone))
+
+    def lined_up(a: _Piece, b: _Piece) -> bool:
+        return abs(a.box[0] - b.box[0]) < 0.6 * max(a.height, b.height)
+
+    keys = [(label, text) for label, text, lone in pairs if not lone and any(
+        other is not label and lined_up(label, other) and lined_up(text, other_text)
+        and abs(label.centre_y - other.centre_y) <= KEY_REACH * max(text.height, other_text.height)
+        for other, other_text, _ in pairs)]
+    joins = [(label, text) for label, text, lone in pairs if lone] + keys
+    # Right to left, so that a row of a key, a bullet and a text ("od 8.00 do 9.00 hod.", "-", "areál")
+    # joins the bullet to the text first and then the key to both; `holder` follows each piece into its join.
+    holder: dict[int, _Piece] = {}
+    for label, text in sorted(joins, key=lambda pair: -pair[0].box[0]):
+        label_now, text_now = holder.get(id(label), label), holder.get(id(text), text)
+        if label_now is text_now:
+            continue
+        joined = _Piece(label_now.words + text_now.words, text_start=len(label_now.words))
+        pieces[pieces.index(text_now)] = joined
+        pieces.remove(label_now)
+        for piece in (label, text, label_now, text_now):
+            holder[id(piece)] = joined
+        for original, now in holder.items():
+            if now in (label_now, text_now):
+                holder[original] = joined
+    # A row of a key column whose key stands too close to its text to be a piece of its own: a piece starting
+    # at the column's keys with a word, after a key, starting at the column's texts. Its text starts there.
+    for piece in pieces:
+        if piece.text_start:
+            continue
+        for label, text in keys:
+            reach = 0.6 * text.height
+            if abs(piece.centre_y - label.centre_y) > KEY_REACH * text.height \
+                    or abs(piece.box[0] - label.box[0]) >= reach:
+                continue
+            starts = [position for position in range(1, len(piece.words)) if keyed(piece.words[:position])
+                      and abs(piece.words[position]["box"][0] - text.box[0]) < reach]
+            if starts:
+                piece.text_start = starts[0]
+                break
 
 
 def _tables(pieces: list[_Piece], body: float, page_width: float) -> list[_Block]:
@@ -348,7 +433,7 @@ def _paragraphs(chain: list[_Piece]) -> list[list[_Piece]]:
 
     A line closes its paragraph when the next line's first word would still have fitted after it, so the
     line break was not forced; this holds for justified and ragged text alike. A line opened by a label
-    joined to it (`_join_labels`) starts a list item or timetable row of its own.
+    (`_join_labels`) starts a list item or timetable row of its own.
     """
     if len(chain) < 3:
         paragraphs = [[chain[0]]]
