@@ -85,7 +85,8 @@ def _automatic_articles(ctx, recognised: dict, order_pages: dict[int, dict]) -> 
              "lines": [[word["id"] for word in line["words"]] for line in recognised["lines"]]}]}]
     layout = read_layout_page(ctx.result(LAYOUT_STEP), index) or {"blocks": []}
     blocks = {block["id"]: block for block in layout["blocks"]}
-    articles = [{**article, "blocks": [{"id": block, "kind": blocks[block]["kind"], "lines": blocks[block]["lines"]}
+    articles = [{**article, "blocks": [{"id": block, "kind": blocks[block]["kind"], "lines": blocks[block]["lines"],
+                                        **({"label": True} if blocks[block].get("label") else {})}
                                        for block in article["blocks"]]} for article in order_pages[index]["articles"]]
     placed = {word for block in layout["blocks"] for line in block["lines"] for word in line}
     rest = [word["id"] for line in recognised["lines"] for word in line["words"] if word["id"] not in placed]
