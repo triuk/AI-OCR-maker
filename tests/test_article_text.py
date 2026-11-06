@@ -6,7 +6,7 @@ import re
 import pymupdf
 import pytest
 
-from fakes import ScriptedProvider, run_and_export
+from fakes import ScriptedProvider, answer_spots, run_and_export
 from layout_pdfs import LEFT, RIGHT, Print, printed_pdf
 from pdfs import czech_font_buffer
 from ocrmaker.steps import implementations
@@ -274,3 +274,51 @@ def test_the_report_counts_the_articles_page_numbers_and_hyphen_decisions_of_the
     assert section["printed_pages"] == [5, 6]
     assert section["hyphens"] == {"joined": 1, "kept": 2}
     assert "Article text zpravodaj-2000-05-ocr.md: 3 articles, 1 ad, 1 caption" in workflow.report_summary(project["id"])
+
+
+# A list of places, one short line each a little apart, starting in lower case without closing punctuation: each
+# line is a paragraph of its own, though a paragraph continued across a column or a page would look the same.
+PLACES = [
+    Print("H-head", (LEFT[0], 44, LEFT[1], 68), "Očkování psů", size=17),
+    paragraph("H1", LEFT[0], 76, 130, "Oznamujeme občanům, že hromadné očkování psů proběhne v úterý na "
+              "těchto místech:", COLUMN),
+    Print("H2", (LEFT[0], 136, LEFT[1], 150), "od osmi hodin u hřiště"),
+    Print("H3", (LEFT[0], 158, LEFT[1], 172), "od deseti hodin u prodejny"),
+    Print("H4", (LEFT[0], 180, LEFT[1], 194), "od poledne v areálu hasičů"),
+]
+
+
+def test_short_lines_one_under_another_stay_paragraphs_of_their_own(tmp_path):
+    provider = ScriptedProvider().on("reading_order", lambda request: {"articles": [
+        article(*(block["number"] for block in request.data["blocks"]))]}).on("readthrough", {"words": []})
+    workflow = Workflow(ProjectStore(tmp_path / "library"), language=provider)
+    project = run_and_export(
+        workflow, workflow.create(printed_pdf(tmp_path / "zpravodaj-2000-05.pdf", [PLACES]))["id"])
+    text = markdown(workflow, project)
+
+    assert "na těchto místech:\n\nod osmi hodin u hřiště\n\nod deseti hodin u prodejny\n\nod poledne" in text, text
+
+
+# A schedule of times and places: each row opens with a key (a time range) a wide gap before its place. The
+# first row is the widest, so geometry alone cannot tell it from a full line of a paragraph.
+TIMES = [
+    Print("T-head", (LEFT[0], 44, RIGHT[1], 68), "Očkování psů", size=17),
+    Print("T1", (LEFT[0], 76, RIGHT[1], 90), "Očkování proběhne v úterý na těchto místech:"),
+    *[item for row, (key, place) in enumerate([("od 8.00 do 9.00", "u hřiště tělovýchovné jednoty na Podlesí dolním"),
+                                               ("od 9.30 do 10.30", "u bývalé prodejny potravin"),
+                                               ("od 11.00 do 12.00", "v areálu hřiště na Václavě")])
+      for item in (Print(f"key{row}", (LEFT[0], 96 + 16 * row, LEFT[0] + 90, 110 + 16 * row), key),
+                   Print(f"place{row}", (LEFT[0] + 110, 96 + 16 * row, RIGHT[1], 110 + 16 * row), place))],
+]
+
+
+def test_rows_opening_with_a_key_stay_paragraphs_of_their_own(tmp_path):
+    provider = ScriptedProvider().on("reading_order", lambda request: {"articles": [
+        article(*(block["number"] for block in request.data["blocks"]))]}).on("readthrough", {"words": []}) \
+        .on("reconstruction", answer_spots()).on("lookup", {"lookups": []})
+    workflow = Workflow(ProjectStore(tmp_path / "library"), language=provider)
+    project = run_and_export(
+        workflow, workflow.create(printed_pdf(tmp_path / "zpravodaj-2000-05.pdf", [TIMES]))["id"])
+    text = markdown(workflow, project)
+
+    assert "na Podlesí dolním\n\nod 9.30 do 10.30 u bývalé prodejny potravin\n\nod 11.00" in text, text

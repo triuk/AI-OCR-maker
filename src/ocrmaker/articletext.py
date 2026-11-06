@@ -46,7 +46,9 @@ Rules:
   heading of an article) or `###`. Captions and tables are preceded by `<!-- caption -->` / `<!-- table -->`;
   a table writes one row per line with cells (found from wide word gaps) separated by " | ".
 - Paragraphs are layout blocks. Two body blocks in a row of one article (across a column or page) form one
-  paragraph when the first ends with a hyphen or without closing punctuation and the next starts in lower case.
+  paragraph when the first ends with a hyphen or without closing punctuation and the next starts in lower case;
+  never when the next opens with a label, and right below each other in one column only when the first's last
+  line was full (`_continues`).
 - Line-end hyphenation is removed and genuine hyphens are kept (`join_hyphenated`, decided by the document's
   own words and the dictionary, no AI; unclear cases default to removal); the text layer of the OCR PDF
   keeps the hyphenation as printed.
@@ -258,14 +260,51 @@ def _table_rows(block: dict) -> list[str]:
     return rows
 
 
-def _continues(upper: dict, lower: dict) -> bool:
-    """Whether the body block `lower` continues the paragraph of `upper` (across a column or a page)."""
+def _box(block: dict) -> list[float] | None:
+    boxes = [word["bbox"] for line in block["lines"] for word in line]
+    if not boxes:
+        return None
+    return [min(box[0] for box in boxes), min(box[1] for box in boxes),
+            max(box[2] for box in boxes), max(box[3] for box in boxes)]
+
+
+def _column_right(upper: dict, lower: dict, column: list[dict]) -> float | None:
+    """The right edge of the column when `lower` lies right below `upper` in it, else None. `column`: the
+    article's paragraph blocks on their page; those about as wide as `upper` and over it share its column."""
+    above, below = _box(upper), _box(lower)
+    if above is None or below is None:
+        return None
+    height = statistics.median(box[3] - box[1] for box in (word["bbox"] for line in upper["lines"] for word in line))
+
+    def overlap(a: list[float], b: list[float]) -> float:
+        return min(a[2], b[2]) - max(a[0], b[0])
+    if overlap(above, below) <= 0.5 * min(above[2] - above[0], below[2] - below[0]) \
+            or not -0.5 * height <= below[1] - above[3] <= 2 * height:
+        return None
+    return max(box[2] for box in map(_box, column)
+               if box is not None and overlap(box, above) > 0.5 * max(box[2] - box[0], above[2] - above[0]))
+
+
+def _continues(upper: dict, lower: dict, right: float | None = None) -> bool:
+    """Whether the body block `lower` continues the paragraph of `upper` (across a column or a page).
+
+    `right` is the column's right edge when `lower` lies right below `upper` in one column (`_column_right`).
+    Layout split them there, so they form one paragraph only when the upper's last line was full: the lower's
+    first word would not have fitted after it (Layout's own paragraph rule). A list of short lines starting in
+    lower case (places and times, items) stays a list, and so does every block Layout found opening with a label
+    (a list item or a timetable row), however full the line above it."""
     above, below = _block_words(upper), _block_words(lower)
-    if not above or not below:
+    if not above or not below or lower.get("label"):
         return False
     last, first = above[-1], below[0].lstrip(PUNCTUATION)
     if ends_with_hyphen(last):
         return True
+    if right is not None:
+        line = next(line for line in reversed(upper["lines"]) if line)
+        opening = next(line for line in lower["lines"] if line)[0]["bbox"]
+        height = statistics.median(word["bbox"][3] - word["bbox"][1] for word in line)
+        if right - line[-1]["bbox"][2] > (opening[2] - opening[0]) + 0.6 * height:
+            return False
     return last.rstrip("\"'“”»)]")[-1:] not in CLOSING and first[:1].islower()
 
 
@@ -273,8 +312,8 @@ def render(source_name: str, pages: list[dict], links: list[dict], known: Dictio
     """The article text Markdown and its statistics.
 
     pages: in PDF order, each {"index", "articles": [{"id", "kind", "continues", "blocks": [{"id", "kind",
-    "lines": [[{"text", "bbox"}]]}]}]}, articles in reading order (kinds as in ocrmaker.reading_order,
-    block kinds as in ocrmaker.layout). links: [{"from", "to"}] articles continued on the next page.
+    "lines": [[{"text", "bbox"}]], "label" (optional)}]}]}, articles in reading order (kinds as in
+    ocrmaker.reading_order, block kinds and "label" as in ocrmaker.layout). links: [{"from", "to"}] articles continued on the next page.
     known: the dictionary that decides unclear line-end hyphens, or None.
     """
     # An empty word box (text unknown, ocrmaker.inkgaps) has no text to write until it is reconstructed.
@@ -379,8 +418,12 @@ def render(source_name: str, pages: list[dict], links: list[dict], known: Dictio
                 continue
             run = [(position, block)]
             if kind in PARAGRAPH_KINDS:
-                while index + len(run) < len(blocks) and blocks[index + len(run)][1]["kind"] in PARAGRAPH_KINDS \
-                        and _continues(run[-1][1], blocks[index + len(run)][1]):
+                while index + len(run) < len(blocks) and blocks[index + len(run)][1]["kind"] in PARAGRAPH_KINDS:
+                    (above_page, above), (below_page, below) = run[-1], blocks[index + len(run)]
+                    column = [other for page, other in blocks if page == above_page and other["kind"] in PARAGRAPH_KINDS]
+                    right = _column_right(above, below, column) if below_page == above_page else None
+                    if not _continues(above, below, right):
+                        break
                     run.append(blocks[index + len(run)])
             index += len(run)
             lines = text_of(hyphens.run(words_of(run)))
