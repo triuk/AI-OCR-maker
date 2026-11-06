@@ -1,7 +1,8 @@
 """Layout: blocks built from recognised lines and words, the format Layout stores and later steps read.
 
 Every recognised word belongs to exactly one block (ADR 0005). Blocks are built locally from geometry:
-Tesseract's lines are split at wide gaps into line pieces, grid-like rows of short pieces become tables,
+Tesseract's lines are split at wide gaps into line pieces, the rows under a printed rule below a table's column
+headings (`ocrmaker.rules`) and grid-like rows of short pieces become tables,
 the remaining pieces are chained downwards into paragraphs (a short closing line stays with its paragraph
 even when Tesseract measures its letters larger), small stray artefacts (specks without letters or digits)
 join the nearest block, and each block gets a kind from its size and position. Blocks are numbered in a geometric reading order (running headers first, then a recursive cut
@@ -21,6 +22,9 @@ and one page file per page, `pages/page-0001.json`:
         "kind": "heading",                   # one of KINDS
         "bbox": [x0, y0, x1, y1],            # union of its word boxes, source page coordinates
         "column": 0,                         # index into "columns"
+        "label": true,                       # only when the block opens with a label (a time, an item
+                                             # number, a bullet, a key of a key column): a list item or a
+                                             # timetable row of its own, never a paragraph's continuation
         "lines": [["p1-w1", "p1-w2"], ...]}]} # word ids: lines top to bottom, words left to right;
                                              # a table's lines are its rows, read across the cells
 
@@ -349,6 +353,73 @@ def _tables(pieces: list[_Piece], body: float, page_width: float) -> list[_Block
     return blocks
 
 
+def _word_rows(words: list[dict]) -> list[list[dict]]:
+    """Words grouped into rows by their centres, top to bottom, each row left to right."""
+    def centre(word: dict) -> float:
+        return (word["box"][1] + word["box"][3]) / 2
+    height = statistics.median(word["box"][3] - word["box"][1] for word in words)
+    rows: list[list[dict]] = []
+    for word in sorted(words, key=centre):
+        if rows and centre(word) - statistics.mean(centre(other) for other in rows[-1]) <= 0.5 * height:
+            rows[-1].append(word)
+        else:
+            rows.append([word])
+    return [sorted(row, key=lambda word: word["box"][0]) for row in rows]
+
+
+def _ruled_tables(pieces: list[_Piece], rules: list[list[float]], body: float) -> list[_Block]:
+    """Tables printed under a rule below their column headings; their pieces are removed from `pieces`.
+
+    The headings are a row of at least two short pieces (at most TABLE_WORDS words, not heading-sized) right
+    above a rule. The table's rows are the pieces below the rule, across the width of the rule and the headings,
+    down to the next rule there, a gap of a missing row or a row of much larger print (a closing greeting). Rows
+    are grouped from words, not pieces: Tesseract often reads neighbouring cells as one piece, which `_tables`
+    cannot tell from a line of text, and sometimes one piece takes a word of the row below. Two columns of text
+    under a rule are no table: their rows hold more than TABLE_WORDS words per heading."""
+    def centre_x(piece: _Piece) -> float:
+        return (piece.box[0] + piece.box[2]) / 2
+
+    blocks = []
+    for rule in sorted(rules, key=lambda rule: rule[1]):
+        headings = sorted((piece for piece in pieces
+                           if -0.3 * piece.height <= rule[1] - piece.box[3] <= 0.8 * piece.height
+                           and rule[0] - piece.height <= centre_x(piece) <= rule[2] + piece.height
+                           and len(piece.words) <= TABLE_WORDS), key=lambda piece: piece.box[0])
+        sizes = [piece.size for piece in headings if piece.size is not None]
+        if len(headings) < 2 or (sizes and statistics.median(sizes) >= HEADING_SIZE * body):
+            continue
+        left = min(rule[0], headings[0].box[0])
+        right = max(rule[2], max(piece.box[2] for piece in headings))
+        below = [other[1] for other in rules if other[1] > rule[3]
+                 and _overlap(other[0], other[2], left, right) > 0.5 * min(other[2] - other[0], right - left)]
+        bottom = min(below, default=float("inf"))
+        cells = [piece for piece in pieces if piece not in headings and left <= centre_x(piece) <= right
+                 and rule[3] < piece.centre_y < bottom]
+        if not cells:
+            continue
+        rows = _word_rows([word for piece in cells for word in piece.words])
+        centres = [statistics.median((word["box"][1] + word["box"][3]) / 2 for word in row) for row in rows]
+        heights = [statistics.median(word["box"][3] - word["box"][1] for word in row) for row in rows]
+        pitch = statistics.median([lower - upper for upper, lower in zip(centres, centres[1:])] or [heights[0]])
+        height = statistics.median(heights)
+        end = 1
+        while end < len(rows) and centres[end] - centres[end - 1] <= 2 * pitch \
+                and heights[end] <= HEADING_SIZE * height:
+            end += 1
+        cells = [piece for piece in cells if piece.centre_y <= centres[end - 1] + 0.5 * pitch]
+        rows = _word_rows([word for piece in cells for word in piece.words])
+        owner = {id(word): id(piece) for piece in cells for word in piece.words}
+        if sum(1 for row in rows if len({owner[id(word)] for word in row}) >= 2) < TABLE_ROWS \
+                or statistics.median(len(row) for row in rows) > TABLE_WORDS * len(headings):
+            continue
+        # A row keeps its cells' words left to right, so a table reads row by row.
+        heading_row = sorted((word for piece in headings for word in piece.words), key=lambda word: word["box"][0])
+        blocks.append(_Block([_Piece(row) for row in [heading_row] + rows], "table"))
+        used = {id(piece) for piece in headings + cells}
+        pieces[:] = [piece for piece in pieces if id(piece) not in used]
+    return blocks
+
+
 def _chains(pieces: list[_Piece]) -> list[list[_Piece]]:
     """Pieces linked downwards into runs of lines: each piece continues the nearest fitting piece above."""
     ordered = sorted(pieces, key=lambda piece: (piece.box[1], piece.box[0]))
@@ -517,8 +588,9 @@ def _geometric(blocks: list[_Block], columns: list[list[_Block]]) -> list[_Block
     return sorted(blocks, key=lambda block: (block.box[1], block.box[0]))
 
 
-def build_page(page: dict, recognised: dict) -> dict:
-    """The layout page file for one prepared page and its recognised lines (see the module docstring)."""
+def build_page(page: dict, recognised: dict, rules: list[list[float]] = ()) -> dict:
+    """The layout page file for one prepared page, its recognised lines and its printed rules (source page
+    coordinates, `ocrmaker.rules`); see the module docstring."""
     matrix = display_matrix(page)
     width, height = display_size(page)
     number = page["index"] + 1
@@ -530,7 +602,8 @@ def build_page(page: dict, recognised: dict) -> dict:
         or [piece.size for piece in pieces if piece.size is not None]
     body = statistics.median(sized) if sized else X_HEIGHT_SHARE * statistics.median(p.height for p in pieces)
     texts = {word["id"]: word["text"] for line in recognised["lines"] for word in line["words"]}
-    blocks = _tables(pieces, body, width)
+    blocks = _ruled_tables(pieces, [apply_rect(matrix, rule) for rule in rules], body)
+    blocks += _tables(pieces, body, width)
     _join_labels(pieces, texts)
     for chain in _chains(pieces):
         blocks.extend(_Block(paragraph) for paragraph in _paragraphs(chain))
@@ -567,6 +640,7 @@ def build_page(page: dict, recognised: dict) -> dict:
             "blocks": [{"id": f"p{number}-b{position}", "number": position, "kind": block.kind,
                         "bbox": _round(union(word["bbox"] for line in block.lines for word in line.words)),
                         "column": renumber[block.column],
+                        **({"label": True} if block.kind != "table" and block.lines[0].text_start else {}),
                         "lines": [[word["id"] for word in line.words] for line in block.lines]}
                        for position, block in enumerate(ordered, start=1)]}
 

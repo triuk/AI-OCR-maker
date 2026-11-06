@@ -1,6 +1,6 @@
 """Generated scans of laid-out pages: text printed into given boxes, so layout and reading order are known.
 
-A page is a list of Print items. Each one names its role in the ground truth (`key`), so a test can find the
+A page is a list of Print items (and Rule items, printed lines). Each one names its role in the ground truth (`key`), so a test can find the
 block holding it by its first word and state the expected reading order as a list of keys.
 """
 from __future__ import annotations
@@ -27,7 +27,20 @@ class Print:
         return self.text.split()
 
 
-def printed_pdf(path: Path, pages: list[list[Print]], *, size=(420, 595), dpi: int = 300) -> Path:
+@dataclass(frozen=True)
+class Rule:
+    """A thin printed line from (x0, y) to (x1, y), as under a table's column headings."""
+    key: str
+    rect: tuple[float, float, float, float]  # x0, y, x1, y
+    text: str = ""
+    width: float = 0.8
+
+    @property
+    def words(self) -> list[str]:
+        return []
+
+
+def printed_pdf(path: Path, pages: list[list[Print | Rule]], *, size=(420, 595), dpi: int = 300) -> Path:
     """A scan PDF: every page one grey raster image of the printed items, no text layer."""
     font = pymupdf.Font(fontbuffer=czech_font_buffer())
     output = pymupdf.open()
@@ -35,6 +48,9 @@ def printed_pdf(path: Path, pages: list[list[Print]], *, size=(420, 595), dpi: i
         printed = pymupdf.open()
         page = printed.new_page(width=size[0], height=size[1])
         for item in items:
+            if isinstance(item, Rule):
+                page.draw_line(item.rect[:2], item.rect[2:], color=(0, 0, 0), width=item.width)
+                continue
             writer = pymupdf.TextWriter(page.rect)
             rect = pymupdf.Rect(item.rect)
             if item.frame:
