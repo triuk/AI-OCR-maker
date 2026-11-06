@@ -8,7 +8,7 @@ import pymupdf
 import pytest
 
 from fakes import ScriptedProvider, answer_spots, run_and_export
-from layout_pdfs import CROSSING, CROSSING_COLUMNS, CROSSING_READING, RULES, TABLE_ROWS, Print, printed_pdf
+from layout_pdfs import CROSSING, CROSSING_COLUMNS, CROSSING_READING, RULES, TABLE_ROWS, Print, Rule, printed_pdf
 from ocrmaker.language import LanguageError
 from ocrmaker.step import Step
 from ocrmaker.steps import implementations
@@ -440,6 +440,60 @@ def test_a_column_of_dates_or_form_labels_is_read_row_by_row_with_the_text_besid
     texts = [text for _, text in block_texts(workflow, project)]
     assert " ".join(texts).split() == words_of(PROGRAMME, [item.key for item in PROGRAMME])
     assert [text.split()[0] for text in texts] == ["2.", "12.", "22.", "Pořadatel:", "Termín:", "Místo"]
+
+
+# A table of births as a newsletter prints it: column headings over a printed rule, no lines between the cells,
+# and cells so close that Tesseract reads a date and a name as one piece of a line.
+BIRTH_COLUMNS = (40, 89, 180, 245)
+BIRTH_ROWS = [("datum", "jméno", "místo narození", "jména rodičů"),
+              ("10. 2. 2000", "Kristýna Žídková", "Karviná", "Alois a Pavla"),
+              ("18. 2. 2000", "Kateřina Kulíšková", "Bohumín", "Martin a Pavla"),
+              ("14. 2. 2000", "Michela Šeligová", "Ostrava", "Pavel a Šárka"),
+              ("6. 3. 2000", "Barbora Wasniowská", "Bohumín", "Jiří a Alice"),
+              ("7. 3. 2000", "Václav Kožušník", "Ostrava", "Jan a Andrea")]
+BIRTHS = [Print("title", (40, 30, 200, 50), "Narodili se", 14),
+          *[Print(f"r{row}c{column}", (left, 58 + 15 * row + (4 if row else 0), right,
+                                       71 + 15 * row + (4 if row else 0)), text, 10)
+            for row, cells in enumerate(BIRTH_ROWS)
+            for column, (text, left, right) in enumerate(zip(cells, BIRTH_COLUMNS, BIRTH_COLUMNS[1:] + (380,)))],
+          Rule("heading rule", (38, 74, 382, 74)),
+          Rule("bottom rule", (38, 158, 382, 158)),
+          Print("after", (40, 168, 380, 210), "Všem rodičům srdečně blahopřejeme a dětem přejeme hodně zdraví "
+                "a radosti do života.")]
+
+
+def test_a_table_under_a_rule_below_its_column_headings_is_read_row_by_row(tmp_path):
+    workflow = Workflow(ProjectStore(tmp_path / "library"), language=None)
+    project = workflow.run(workflow.create(printed_pdf(tmp_path / "zpravodaj.pdf", [BIRTHS]))["id"])
+
+    texts = block_texts(workflow, project)
+    assert [text for kind, text in texts if kind == "table"] == [" ".join(cell for row in BIRTH_ROWS for cell in row)]
+    assert texts[-1] == ("body", BIRTHS[-1].text)
+
+
+# Two articles over two others, each in two columns, a rule between them; the columns above end in short lines
+# right over the rule, which look like the column headings of a table.
+RULED_COLUMNS = [Print("a-left", (40, 40, 200, 98), "Obecní zastupitelstvo schválilo rozpočet na příští rok "
+                       "a opravu chodníků v centru obce."),
+                 Print("a-end", (40, 100, 200, 114), "To je vše."),
+                 Print("c-right", (220, 40, 380, 98), "Knihovna rozšiřuje otevírací dobu a nabízí čtenářům "
+                       "nové tituly pro děti i dospělé."),
+                 Print("c-end", (220, 100, 380, 114), "Přijďte k nám."),
+                 Rule("rule", (38, 117, 382, 117)),
+                 Print("b-left", (40, 122, 200, 200), "Hasiči oslavili výročí založení sboru slavnostní "
+                       "schůzí a ukázkou staré techniky na návsi před obecním úřadem."),
+                 Print("d-right", (220, 122, 380, 200), "Fotbalisté vyhráli okresní přebor a postoupili do "
+                       "vyšší soutěže, kde se utkají s týmy z celého kraje.")]
+
+
+def test_a_rule_between_articles_in_columns_is_no_table(tmp_path):
+    workflow = Workflow(ProjectStore(tmp_path / "library"), language=None)
+    project = workflow.run(workflow.create(printed_pdf(tmp_path / "zpravodaj.pdf", [RULED_COLUMNS]))["id"])
+
+    texts = [text for kind, text in block_texts(workflow, project) if kind != "table"]
+    # Column by column, the geometric order.
+    assert " ".join(texts).split() == words_of(RULED_COLUMNS, ["a-left", "a-end", "b-left", "c-right", "c-end",
+                                                               "d-right"])
 
 
 class StrayOcr(Step):

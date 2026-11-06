@@ -13,6 +13,7 @@ from collections import Counter
 from ..layout import LAYOUT_FILE, block_words, build_page, page_file
 from ..pages import PREPARED_STEP, read_pages
 from ..reading_order import ORDER_FILE, ORDER_STEP
+from ..rules import page_rules
 from ..step import Step, StepContext, StepResult
 from ..words import OCR_STEP, page_words, read_page
 
@@ -44,7 +45,9 @@ class LayoutStep(Step):
             ctx.progress(page["index"], len(pages), f"Stránka {page['index'] + 1} z {len(pages)}")
             started = time.monotonic()
             recognised = read_page(ocr, page["index"]) or {"lines": []}
-            layout = build_page(page, recognised)
+            raster = page["raster"]
+            rules = page_rules(ctx.result(raster["step"]).path(raster["file"]), raster)
+            layout = build_page(page, recognised, rules)
             ctx.output.write_json(page_file(page["index"]), layout)
             kinds = dict(Counter(block["kind"] for block in layout["blocks"]))
             summaries.append({"index": page["index"], "file": page_file(page["index"]),
