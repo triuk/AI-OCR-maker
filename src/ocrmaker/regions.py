@@ -39,6 +39,8 @@ import pymupdf
 from .inkgaps import _square, load_grey
 from .pages import apply_rect, multiply
 
+REGIONS_STEP = "regions"
+REGIONS_FILE = "regions.json"
 PURPOSE = "layout_regions"
 KINDS = ("article", "header", "footer", "ad")
 ORIENTATIONS = ("0", "90", "180", "270", "stacked")
@@ -1076,3 +1078,19 @@ def layout_page(page: Page, ask, image: Path) -> dict:
     entry["spots"] = [[round(v, 2) for v in spot["box"]] for spot in final_snap["spots"]]
     entry["check"] = found
     return entry
+
+
+def region_degrees(region: dict) -> int:
+    """The clockwise turn that makes a layout region's text upright; stacked letters are read unturned for now."""
+    return 0 if region["orientation"] == "stacked" else int(region["orientation"])
+
+
+def divided_pages(ctx) -> dict[int, list[dict]] | None:
+    """For a step after Layout (regions): the layout regions of every page by page index, or None when the pages
+    were not divided into regions (the setting `layout_method` "blocks", or no Layout regions result)."""
+    if not ctx.has_result(REGIONS_STEP):
+        return None
+    data = ctx.result(REGIONS_STEP).read_json(REGIONS_FILE)
+    if data["method"] != "regions":
+        return None
+    return {entry["index"]: entry["regions"] for entry in data["pages"]}

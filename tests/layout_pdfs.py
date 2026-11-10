@@ -21,6 +21,7 @@ class Print:
     size: float = 11
     frame: bool = False  # a printed frame around the text, as around an ad
     shade: bool = False  # a halftone grey background under the text, as under a boxed notice
+    turn: int = 0  # printed turned by this many degrees counterclockwise: 90 runs bottom to top in `rect`
 
     @property
     def words(self) -> list[str]:
@@ -57,9 +58,13 @@ def printed_pdf(path: Path, pages: list[list[Print | Rule]], *, size=(420, 595),
                 page.draw_rect(rect + (-5, -5, 5, 5), color=(0, 0, 0), width=1.2)
             if item.shade:
                 _halftone(page, rect + (-5, -5, 5, 5))
-            overflow = writer.fill_textbox(rect, item.text, font=font, fontsize=item.size)
+            centre = (rect.tl + rect.br) / 2
+            upright = rect if item.turn % 180 == 0 else pymupdf.Rect(
+                centre.x - rect.height / 2, centre.y - rect.width / 2, centre.x + rect.height / 2,
+                centre.y + rect.width / 2)
+            overflow = writer.fill_textbox(upright, item.text, font=font, fontsize=item.size)
             assert not overflow, f"{item.key} does not fit its box"
-            writer.write_text(page)
+            writer.write_text(page, morph=(centre, pymupdf.Matrix(item.turn)) if item.turn else None)
         image = page.get_pixmap(dpi=dpi, colorspace=pymupdf.csGRAY)
         scanned = output.new_page(width=size[0], height=size[1])
         scanned.insert_image(scanned.rect, stream=image.tobytes("png"), keep_proportion=False)

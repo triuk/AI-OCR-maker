@@ -10,8 +10,9 @@ from __future__ import annotations
 import time
 from collections import Counter
 
-from ..layout import LAYOUT_FILE, block_words, build_page, page_file
+from ..layout import LAYOUT_FILE, block_words, build_page, build_regions, page_file
 from ..pages import PREPARED_STEP, read_pages
+from ..regions import divided_pages
 from ..reading_order import ORDER_FILE, ORDER_STEP
 from ..rules import page_rules
 from ..step import Step, StepContext, StepResult
@@ -39,6 +40,7 @@ class LayoutStep(Step):
     def run(self, ctx: StepContext) -> None:
         pages = read_pages(ctx.result(PREPARED_STEP))
         ocr = ctx.result(OCR_STEP)
+        divided = divided_pages(ctx)
         summaries = []
         for page in pages:
             ctx.checkpoint()
@@ -47,7 +49,10 @@ class LayoutStep(Step):
             recognised = read_page(ocr, page["index"]) or {"lines": []}
             raster = page["raster"]
             rules = page_rules(ctx.result(raster["step"]).path(raster["file"]), raster)
-            layout = build_page(page, recognised, rules)
+            if divided is None:
+                layout = build_page(page, recognised, rules)
+            else:
+                layout = build_regions(page, recognised, rules, divided.get(page["index"], []))
             ctx.output.write_json(page_file(page["index"]), layout)
             kinds = dict(Counter(block["kind"] for block in layout["blocks"]))
             summaries.append({"index": page["index"], "file": page_file(page["index"]),

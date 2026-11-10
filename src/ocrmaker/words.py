@@ -13,6 +13,8 @@ and one page file per page, `pages/page-0001.json`:
         "bbox": [x0, y0, x1, y1],              # source page coordinates (see ocrmaker.pages)
         "baseline": [[x, y], [x, y]],          # start and end point, source page coordinates
         "block": 0, "paragraph": 0,            # Tesseract's block and paragraph numbers on the page (hints)
+        "region": "p1-r1",                     # only on a page divided into layout regions (ocrmaker.regions):
+                                               # the region the line was read in
         "words": [{
             "id": "p1-w1",                     # unique in the project, stable across later steps
             "text": "Obecní",                  # NFC; never whitespace only; "" only for an empty word box
@@ -24,6 +26,11 @@ Word and line boxes describe the page as displayed (text upright), mapped back i
 coordinates, so on a page with /Rotate a word box is upright only after `pages.display_matrix`. Word order
 within a line is left to right as displayed; the order of lines is Tesseract's and carries no meaning
 beyond that (reading order is decided later). Whitespace-only boxes are dropped (ADR 0005).
+
+On a page divided into layout regions (ADR 0006) each region is read on its own and every line names its region;
+lines follow the regions' order, each region's lines in Tesseract's order, and no word lies outside a region. In
+a turned region (orientation other than "0") "upright" and "left to right" refer to the region's text turned by
+its orientation; the boxes are still the source page boxes of that text.
 
 Empty word boxes: ink inside a line that no recognised word covers becomes a word with text "", confidence
 0.0, no chars and an id `p<page>-e<n>` (ocrmaker.inkgaps), in its line at its place in display order. Every

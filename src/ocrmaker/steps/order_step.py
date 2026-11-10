@@ -1,5 +1,8 @@
 """Reading order: one AI request per page groups Layout's numbered blocks into articles in reading order.
 
+On pages divided into layout regions (ADR 0006) the articles, their kinds and their order are the regions'
+(`reading_order.region_articles`) and no request is made; links of articles continued across pages follow (#19).
+
 An invalid answer gives the page the geometric order and a warning, so no text is ever lost. Without any AI
 provider (none installed or configured) every page gets the geometric order and the step warns once; any
 other AI failure (usage limit, login, timeout) fails the step with its Czech message so it can be rerun.
@@ -13,6 +16,7 @@ from .. import reading_order as rules
 from ..language import UNAVAILABLE, PageRequests, request_fields
 from ..layout import LAYOUT_STEP, read_layout_page
 from ..pages import PREPARED_STEP, read_pages
+from ..regions import divided_pages
 from ..step import Step, StepContext
 from ..words import OCR_STEP, page_words, read_page
 from ..wording import on_pages
@@ -27,6 +31,7 @@ class OrderStep(Step):
         pages = read_pages(ctx.result(PREPARED_STEP))
         layout_result, ocr = ctx.result(LAYOUT_STEP), ctx.result(OCR_STEP)
         results, links, invalid, previous = [], [], [], None
+        divided = divided_pages(ctx)
         ai = PageRequests()
         for page in pages:
             ctx.checkpoint()
@@ -39,6 +44,8 @@ class OrderStep(Step):
             groups = None
             if not layout["blocks"]:
                 entry["source"] = "empty"
+            elif divided is not None:
+                entry["source"] = "regions"
             else:
                 asked, failure = ai.ask(lambda: self._ask(ctx, page, len(pages), layout, texts, previous))
                 if asked is not None:
@@ -49,11 +56,14 @@ class OrderStep(Step):
                     groups = None
                     entry["reason"] = "; ".join(problems)
                     invalid.append(number)
-            if groups is None and layout["blocks"]:
+            if groups is None and layout["blocks"] and entry["source"] != "regions":
                 entry["source"] = "geometric"
                 entry["reason"] = entry["reason"] or f"{UNAVAILABLE}: {ai.unavailable}"
                 groups = rules.geometric_groups(layout)
-            articles = rules.compose(groups or [], layout, number)
+            if entry["source"] == "regions":
+                articles = rules.region_articles(layout, divided.get(page["index"], []), number)
+            else:
+                articles = rules.compose(groups or [], layout, number)
             entry["articles"] = articles
             results.append(entry)
             links += [{"from": article["continues"], "to": article["id"]} for article in articles

@@ -11,15 +11,25 @@ letters Tesseract missed, and what is read in such a sliver is a guess (it stays
 Then words Tesseract merged over a narrow space ("19.2.2000" for "19. 2. 2000") are cut at it
 (`inkgaps.split_narrow_spaces`), and the ink gap finder adds empty word boxes for ink inside lines no word covers.
 
+On a page divided into layout regions (ADR 0006, the Layout regions result) each region is read like that on its
+own, turned upright by its orientation (`recognise_regions`); ink outside every region is not read.
+
 The result format is described in `ocrmaker.words`; all geometry is in source page coordinates.
 """
 from __future__ import annotations
 
+import math
+import tempfile
 import time
+from pathlib import Path
+
+import numpy
+import pymupdf
 
 from .. import inkgaps, tessdata, tesseract
 from ..errors import StepError
-from ..pages import PREPARED_STEP, read_pages
+from ..pages import PREPARED_STEP, apply_rect, invert, multiply, read_pages, upright
+from ..regions import divided_pages, region_degrees
 from ..step import ReportSection, Step, StepContext, StepResult
 from ..words import OCR_FILE, page_file, page_words, read_page
 from ..wording import on_pages
@@ -30,6 +40,8 @@ from ..wording import on_pages
 RECOVERED_CONFIDENCE = 50.0
 # A line read on the cleared page is kept only when at least this share of the page's median line height.
 RECOVERED_HEIGHT = 0.6
+# The paper level of a region: this percentile of its grey values (most of a region is paper).
+PAPER_PERCENTILE = 90
 
 
 def _with_lines(recognised: dict, found: list[list[dict]]) -> dict:
@@ -82,6 +94,61 @@ def recognise_page(recognizer, page: dict, raster_path) -> dict:
     return inkgaps.find_empty_words(recognised, raster_path, raster["to_raster"], raster["to_source"])
 
 
+def recognise_regions(recognizer, page: dict, raster_path, layout_regions: list[dict], workdir: Path) -> dict:
+    """The page file of a page divided into layout regions: each region read as a page of its own
+    (`recognise_page`) on the working raster with everything outside the region painted over with paper, turned
+    so that the region's text is upright, and mapped back to source page coordinates. The whole page stays the
+    canvas because Tesseract reads a small crop of it worse (its page analysis depends on the image size). Ink
+    that an earlier region already holds is painted over too, so every word is read in exactly one region, and ink
+    outside every region is never read. Every line names its region; lines follow the regions' order."""
+    raster = page["raster"]
+    grey = inkgaps.load_grey(raster_path)
+    height, width = grey.shape
+    lines, taken = [], []
+    for number, region in enumerate(layout_regions, start=1):
+        x0, y0, x1, y1 = apply_rect(raster["to_raster"], region["bbox"])
+        x0, y0 = max(0, math.floor(x0)), max(0, math.floor(y0))
+        x1, y1 = min(width, math.ceil(x1)), min(height, math.ceil(y1))
+        if x1 <= x0 or y1 <= y0:
+            continue
+        own = grey[y0:y1, x0:x1]
+        paper = int(numpy.percentile(own, PAPER_PERCENTILE))
+        canvas = numpy.full_like(grey, paper)
+        canvas[y0:y1, x0:x1] = own
+        for a0, b0, a1, b1 in taken:
+            canvas[b0:b1, a0:a1] = paper
+        taken.append((x0, y0, x1, y1))
+        degrees = region_degrees(region)
+        turn, _, _ = upright([0, 0, width, height], degrees)
+        pixels = numpy.ascontiguousarray(numpy.rot90(canvas, k=-degrees // 90))
+        # turned raster pixel -> working raster pixel -> source page coordinates
+        to_source = multiply(invert(turn), raster["to_source"])
+        path = workdir / f"region-{number}.png"
+        rows, columns = pixels.shape
+        pymupdf.Pixmap(pymupdf.csGRAY, columns, rows, pixels.tobytes(), 0).save(path)
+        turned = {"index": page["index"], "raster": {**raster, "width": columns, "height": rows,
+                                                    "to_source": to_source, "to_raster": invert(to_source)}}
+        lines += [{**line, "region": region["id"]} for line in recognise_page(recognizer, turned, path)["lines"]]
+    return {"index": page["index"], "lines": _numbered(page["index"], lines)}
+
+
+def _numbered(index: int, lines: list[dict]) -> list[dict]:
+    """The lines with line, word and empty word ids numbered anew on the page (regions are read apart)."""
+    number, words, empty = index + 1, 0, 0
+    numbered = []
+    for position, line in enumerate(lines, start=1):
+        renamed = []
+        for word in line["words"]:
+            if word["text"]:
+                words += 1
+                renamed.append({**word, "id": f"p{number}-w{words}"})
+            else:
+                empty += 1
+                renamed.append({**word, "id": f"p{number}-e{empty}"})
+        numbered.append({**line, "id": f"p{number}-l{position}", "words": renamed})
+    return numbered
+
+
 class OcrStep(Step):
     id = "ocr"
 
@@ -93,7 +160,8 @@ class OcrStep(Step):
         except tessdata.ModelError as exc:  # already a Czech message
             raise StepError(str(exc)) from exc
         summaries, empty = [], []
-        with tesseract.Recognizer(model, language) as recognizer:
+        divided = divided_pages(ctx)
+        with tesseract.Recognizer(model, language) as recognizer, tempfile.TemporaryDirectory() as workdir:
             for page in pages:
                 ctx.checkpoint()
                 number = page["index"] + 1
@@ -101,7 +169,11 @@ class OcrStep(Step):
                 started = time.monotonic()
                 raster = page["raster"]
                 raster_path = ctx.result(raster["step"]).path(raster["file"])
-                recognised = recognise_page(recognizer, page, raster_path)
+                if divided is None:
+                    recognised = recognise_page(recognizer, page, raster_path)
+                else:
+                    recognised = recognise_regions(recognizer, page, raster_path, divided.get(page["index"], []),
+                                                   Path(workdir))
                 ctx.output.write_json(page_file(page["index"]), recognised)
                 # Word count and mean confidence describe Tesseract's readings; empty word boxes are counted apart.
                 confidences = [word["confidence"] for word in page_words(recognised) if word["text"]]

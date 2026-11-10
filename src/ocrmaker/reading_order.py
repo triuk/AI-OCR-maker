@@ -16,7 +16,8 @@ The Reading order result (`steps/order/`) holds `order.json`:
 
     {"pages": [{
         "index": 0,
-        "source": "ai",                       # "ai", "geometric" (fallback) or "empty" (no blocks)
+        "source": "ai",                       # "ai", "geometric" (fallback), "regions" (articles of the layout
+                                              # regions, `region_articles`) or "empty" (no blocks)
         "reason": null,                       # why the fallback was used (English), else null
         "request": {"provider": "claude", "model": "sonnet", "usage": {...} | null} | null,
         "articles": [{                        # in reading order
@@ -169,6 +170,19 @@ def compose(groups: list[dict], layout: dict, page_number: int) -> list[dict]:
                          "blocks": [blocks[number]["id"] for number in group["blocks"]],
                          "continues": group.get("continues")})
     return articles
+
+
+def region_articles(layout: dict, layout_regions: list[dict], page_number: int) -> list[dict]:
+    """The page's articles as the layout regions give them (ADR 0006): regions of one article in their order, each
+    with its blocks in Layout's order, the article's kind the regions' kind; articles without a block are left out."""
+    groups = []
+    for region in layout_regions:
+        blocks = [block["id"] for block in layout["blocks"] if block.get("region") == region["id"]]
+        if not groups or groups[-1]["number"] != region["article"]:
+            groups.append({"number": region["article"], "kind": region["kind"], "blocks": []})
+        groups[-1]["blocks"] += blocks
+    return [{"id": f"p{page_number}-a{position}", "kind": group["kind"], "blocks": group["blocks"], "continues": None}
+            for position, group in enumerate((group for group in groups if group["blocks"]), start=1)]
 
 
 def geometric_groups(layout: dict) -> list[dict]:

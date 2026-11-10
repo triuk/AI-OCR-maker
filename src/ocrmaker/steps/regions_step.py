@@ -17,12 +17,11 @@ from .. import tessdata, tesseract
 from ..errors import StepError
 from ..language import UNAVAILABLE, PageRequests, request_fields
 from ..pages import PREPARED_STEP, read_pages
+from ..regions import REGIONS_FILE, REGIONS_STEP
 from ..step import ReportSection, Step, StepContext, StepResult
 from ..wording import on_pages
 from .ocr_step import recognise_page
 
-REGIONS_STEP = "regions"
-REGIONS_FILE = "regions.json"
 PREVIEWS = "previews"
 
 
