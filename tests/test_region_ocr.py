@@ -4,8 +4,9 @@ from __future__ import annotations
 import pymupdf
 import pytest
 
-from fakes import ScriptedProvider, run_and_export
-from layout_pdfs import CROSSING, CROSSING_COLUMNS, CROSSING_READING, Print, printed_pdf
+from fakes import ScriptedProvider, answer_spots, run_and_export
+from layout_pdfs import CROSSING, CROSSING_COLUMNS, CROSSING_READING, RULES, Print, printed_pdf
+from ocrmaker import reading_order as rules
 from ocrmaker import regions
 from ocrmaker.steps import implementations
 from ocrmaker.store import ProjectStore
@@ -142,3 +143,110 @@ def test_a_turned_region_is_read_upright_in_source_page_coordinates(tmp_path):
     assert [word["bbox"][1] for word in words] == sorted((word["bbox"][1] for word in words), reverse=True)
     layout = workflow.result(project["id"], "layout").read_json(page_file(0))
     assert [block["kind"] for block in layout["blocks"] if block["region"] == "p1-r2"] == ["header"]
+
+
+def box(page, *keys, pad=4) -> list[int]:
+    """The grid box (0..1000) around the printed items of a RULES page."""
+    rects = [item.rect for item in RULES[page] if item.key in keys]
+    x0, y0 = min(r[0] for r in rects) - pad, min(r[1] for r in rects) - pad
+    x1, y1 = max(r[2] for r in rects) + pad, max(r[3] for r in rects) + pad
+    return [round(x0 * 1000 / 420), round(y0 * 1000 / 595), round(x1 * 1000 / 420), round(y1 * 1000 / 595)]
+
+
+TABLE = [item.key for item in RULES[1] if item.key.startswith("T-")]
+RULES_REGIONS = [
+    {"parts": [part("Rychvaldský zpravodaj", box(0, "header-1"), kind="header"),
+               part("Hasiči slavili", box(0, "C-head", "C1"), box(0, "caption-1")),
+               part("Zastupitelé projednali", box(0, "E1")),
+               part("Prodám garáž", box(0, "ad-1"), kind="ad"),
+               part("strana 1", box(0, "footer-1"), kind="footer")]},
+    {"parts": [part("Rychvaldský zpravodaj", box(1, "header-2"), kind="header"),
+               part("začnou ještě letos", box(1, "E2")),
+               part("Turnaj v kopané", box(1, "F-head", "F1"), box(1, *TABLE)),
+               part("strana 2", box(1, "footer-2"), kind="footer")]}]
+
+
+def regions_in_turn(answers):
+    """Layout regions answers page by page; a corrective request gets the current page's answer again."""
+    pages = iter(answers)
+    current = {}
+
+    def answer(request):
+        if isinstance(request.data, str):
+            current["answer"] = next(pages)
+        return current["answer"]
+    return answer
+
+
+def continued(request) -> dict:
+    """The link of the page's article starting "začnou" to the previous page's article ending "oplocení"."""
+    [article] = [item["id"] for item in request.data["articles"] if item["starts"].startswith("začnou")]
+    [previous] = [item["id"] for item in request.data["previous_page"]["articles"]
+                  if item["ends"].endswith("oplocení")]
+    return {"links": [{"article": article, "continues": previous}]}
+
+
+@pytest.fixture(scope="module")
+def continuation(tmp_path_factory):
+    """Two pages divided into layout regions; an article of page 1 goes on at the top of page 2."""
+    directory = tmp_path_factory.mktemp("continuation")
+    provider = ScriptedProvider().on(regions.PURPOSE, regions_in_turn(RULES_REGIONS))
+    provider.on("readthrough", {"words": []}).on("reconstruction", answer_spots())
+    provider.on(rules.CONTINUATION_PURPOSE, continued)
+    workflow = Workflow(ProjectStore(directory / "library"), language=provider)
+    project = workflow.create(printed_pdf(directory / "zpravodaj-2000-05.pdf", RULES))
+    workflow.update_settings(project["id"], {"layout_method": "regions"})
+    return workflow, provider, run_and_export(workflow, project["id"])
+
+
+def test_an_article_continued_on_the_next_page_is_linked_from_the_text_of_both_pages(continuation):
+    workflow, provider, project = continuation
+    assert {step["id"]: step["state"] for step in project["steps"]}["order"] == "done"
+
+    # only the second page has a previous page to continue; the request shows the articles, never their blocks
+    [request] = provider.requests_for(rules.CONTINUATION_PURPOSE)
+    assert request.images == []
+    assert [item["id"] for item in request.data["previous_page"]["articles"]] == ["p1-a2", "p1-a3"]
+    assert [item["id"] for item in request.data["articles"]] == ["p2-a2", "p2-a3"]
+    assert request.data["articles"][1]["starts"].startswith("Turnaj v kopané Fotbalisté")
+    assert "blocks" not in str(request.data)
+    order = workflow.result(project["id"], "order").read_json("order.json")
+    assert order["links"] == [{"from": "p1-a3", "to": "p2-a2"}]
+    assert [[(item["kind"], item["continues"]) for item in page["articles"]] for page in order["pages"]] == [
+        [("header", None), ("article", None), ("article", None), ("ad", None), ("footer", None)],
+        [("header", None), ("article", "p1-a3"), ("article", None), ("footer", None)]]
+    assert [page["source"] for page in order["pages"]] == ["regions", "regions"]
+    assert order["pages"][0]["request"] is None and order["pages"][1]["request"]["model"] == "scripted-model"
+
+    # the text keeps the regions' order (a table without rules inside its region is read by columns, #23)
+    second = " ".join(extracted_words(workflow, project, 1))
+    starts = [second.index(" ".join(words_of(RULES[1], [key])[:3])) for key in ("header-2", "E2", "F-head", "F1")]
+    assert starts == sorted(starts) and second.endswith("strana 2")
+
+
+@pytest.mark.parametrize("answer", [
+    {"links": [{"article": "p2-a1", "continues": "p1-a3"}]},    # a running header cannot continue an article
+    {"links": [{"article": "p2-a2", "continues": "p1-a9"}]},    # no such article on the previous page
+    {"links": [{"article": "p2-a2", "continues": "p1-a3"}, {"article": "p2-a3", "continues": "p1-a3"}]},
+    {"links": [{"article": ["p2-a2"], "continues": "p1-a3"}]},  # not an id
+    "not json"])
+def test_an_invalid_continuation_answer_links_nothing_with_a_warning_and_keeps_the_articles(continuation, answer):
+    workflow, provider, project = continuation
+    before = workflow.result(project["id"], "order").read_json("order.json")
+    provider.on(rules.CONTINUATION_PURPOSE, answer)
+    try:
+        project = workflow.rerun(project["id"], "order")
+        check_unlinked(workflow, project, before)
+    finally:
+        provider.on(rules.CONTINUATION_PURPOSE, continued)
+        workflow.rerun(project["id"], "order")
+
+
+def check_unlinked(workflow, project, before):
+    state = {step["id"]: step for step in project["steps"]}["order"]
+    assert state["state"] == "warning" and "propojen" in state["message"]
+    order = workflow.result(project["id"], "order").read_json("order.json")
+    assert order["links"] == []
+    assert order["pages"][1]["reason"]
+    assert [[item["blocks"] for item in page["articles"]] for page in order["pages"]] == [
+        [item["blocks"] for item in page["articles"]] for page in before["pages"]]

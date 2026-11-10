@@ -1,7 +1,9 @@
 """Reading order: one AI request per page groups Layout's numbered blocks into articles in reading order.
 
 On pages divided into layout regions (ADR 0006) the articles, their kinds and their order are the regions'
-(`reading_order.region_articles`) and no request is made; links of articles continued across pages follow (#19).
+(`reading_order.region_articles`); the AI only links articles continued from the previous page, from the text of
+both pages and without an image (one request per page with a previous page). It never regroups or reorders the
+articles: an invalid answer or no AI leaves the page unlinked with a warning.
 
 An invalid answer gives the page the geometric order and a warning, so no text is ever lost. Without any AI
 provider (none installed or configured) every page gets the geometric order and the step warns once; any
@@ -30,8 +32,9 @@ class OrderStep(Step):
     def run(self, ctx: StepContext) -> None:
         pages = read_pages(ctx.result(PREPARED_STEP))
         layout_result, ocr = ctx.result(LAYOUT_STEP), ctx.result(OCR_STEP)
-        results, links, invalid, previous = [], [], [], None
+        results, links, invalid, unlinked, previous = [], [], [], [], None
         divided = divided_pages(ctx)
+        words = rules.SNIPPET_WORDS if divided is None else rules.CONTINUATION_WORDS
         ai = PageRequests()
         for page in pages:
             ctx.checkpoint()
@@ -62,13 +65,27 @@ class OrderStep(Step):
                 groups = rules.geometric_groups(layout)
             if entry["source"] == "regions":
                 articles = rules.region_articles(layout, divided.get(page["index"], []), number)
+                data = rules.continuation_data(page, len(pages), articles, layout, texts, previous)
+                if data is not None:
+                    asked, failure = ai.ask(lambda: self._ask_links(ctx, data))
+                    if asked is not None:
+                        answer, entry["request"], problems = asked
+                        articles = articles if problems else rules.link(articles, answer)
+                    else:
+                        problems = [failure] if failure else []
+                    if problems:
+                        entry["reason"] = "; ".join(problems)
+                        unlinked.append(number)
+                    elif ai.unavailable is not None:
+                        entry["reason"] = f"{UNAVAILABLE}: {ai.unavailable}"
             else:
                 articles = rules.compose(groups or [], layout, number)
             entry["articles"] = articles
             results.append(entry)
             links += [{"from": article["continues"], "to": article["id"]} for article in articles
                       if article["continues"]]
-            previous = {"page": number, "articles": rules.previous_articles(articles, layout, texts)}
+            if articles:  # a page without text (a picture, a blank scan) does not break a continuation
+                previous = {"page": number, "articles": rules.previous_articles(articles, layout, texts, words)}
             ctx.output.write_overlay(page["index"], self._overlay(entry, layout))
             ctx.record("reading_order", index=page["index"], source=entry["source"], reason=entry["reason"],
                        blocks=len(layout["blocks"]), articles=len(articles),
@@ -76,9 +93,14 @@ class OrderStep(Step):
                        **request_fields(entry["request"]), seconds=round(time.monotonic() - started, 3))
         ctx.progress(len(pages), len(pages), f"Stránka {len(pages)} z {len(pages)}")
         ctx.output.write_json(rules.ORDER_FILE, {"pages": results, "links": links})
-        if ai.unavailable is not None:
+        if ai.unavailable is not None and divided is not None:
+            ctx.warn(f"AI není k dispozici ({ai.unavailable}), články proto nejsou propojené přes strany.")
+        elif ai.unavailable is not None:
             ctx.warn(f"AI není k dispozici ({ai.unavailable}), pořadí čtení je proto geometrické: sloupce zleva "
                      "doprava, každý shora dolů.")
+        if unlinked:
+            ctx.warn(f"AI vrátila neplatné pokračování článků {on_pages(unlinked)}; tyto strany nejsou propojené "
+                     "s předchozí stranou. Žádný text nechybí.")
         if invalid:
             ctx.warn(f"AI vrátila neplatné pořadí čtení {on_pages(invalid)}; použito geometrické "
                      "pořadí (sloupce zleva doprava). Žádný text nechybí.")
@@ -95,6 +117,15 @@ class OrderStep(Step):
                         if article["kind"] == "article"}
         problems = rules.validate(answer.data, len(layout["blocks"]), previous_ids)
         return (None if problems else answer.data["articles"]), request, problems
+
+    @staticmethod
+    def _ask_links(ctx: StepContext, data: dict):
+        answer = ctx.language.ask(rules.CONTINUATION_INSTRUCTIONS, data, schema=rules.CONTINUATION_SCHEMA,
+                                  purpose=rules.CONTINUATION_PURPOSE)
+        articles = {item["id"] for item in data["articles"]}
+        previous_ids = {item["id"] for item in data["previous_page"]["articles"]}
+        problems = rules.validate_links(answer.data, articles, previous_ids)
+        return answer.data, answer.request, problems
 
     @staticmethod
     def _overlay(entry: dict, layout: dict) -> dict:
