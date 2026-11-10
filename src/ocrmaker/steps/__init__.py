@@ -1,4 +1,4 @@
-"""The fixed workflow: ten steps in order, and discovery of the steps implemented so far.
+"""The fixed workflow: eleven steps in order, and discovery of the steps implemented so far.
 
 A step is implemented by adding the module `ocrmaker/steps/<id>_step.py` with a module-level `STEP`,
 an instance of `ocrmaker.step.Step` whose `id` matches its definition below. Nothing else needs to change:
@@ -28,8 +28,9 @@ class StepDefinition:
 STEPS = (
     StepDefinition("import", "Import"),
     StepDefinition("prepare", "Příprava obrazu"),
+    StepDefinition("regions", "Rozvržení"),
     StepDefinition("ocr", "Lokální OCR"),
-    StepDefinition("layout", "Rozvržení"),
+    StepDefinition("layout", "Bloky"),
     StepDefinition("order", "Pořadí čtení"),
     StepDefinition("problems", "Detekce problémů"),
     StepDefinition("reconstruct", "AI rekonstrukce"),

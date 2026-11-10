@@ -35,7 +35,7 @@ def test_a_run_executes_implemented_steps_in_order_and_skips_missing_ones(make_w
 
     finished = workflow.run(project["id"])
 
-    assert states(finished) == {"import": "done", "prepare": "pending", "ocr": "done", "layout": "pending",
+    assert states(finished) == {"import": "done", "prepare": "pending", "regions": "pending", "ocr": "done", "layout": "pending",
                                 "order": "pending", "problems": "pending", "reconstruct": "pending",
                                 "lookup": "pending", "review": "pending", "export": "pending"}
     ocr = workflow.result(project["id"], "ocr").read_json("result.json")
@@ -289,7 +289,7 @@ def test_a_rerun_invalidates_the_step_and_every_later_step_and_runs_them_again(m
     workflow.run(project["id"])
 
     assert workflow.rerun_impact(project["id"], "import") == {"corrections": 0, "steps": [
-        "import", "prepare", "ocr", "layout", "order", "problems", "reconstruct", "lookup", "review", "export"]}
+        "import", "prepare", "regions", "ocr", "layout", "order", "problems", "reconstruct", "lookup", "review", "export"]}
     rerun = workflow.rerun(project["id"], "import")
 
     assert (imported.calls, ocr.calls) == (2, 2)

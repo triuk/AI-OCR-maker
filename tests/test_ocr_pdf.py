@@ -54,7 +54,7 @@ def test_run_goes_through_import_preparation_local_ocr_and_export(columns):
 
     # Without an AI provider the reading order is geometric, with a warning; the clean page has no problem
     # spots, so AI reconstruction and Web lookup have nothing to ask.
-    assert states(project) == {"import": "done", "prepare": "done", "ocr": "done", "layout": "done",
+    assert states(project) == {"import": "done", "prepare": "done", "regions": "done", "ocr": "done", "layout": "done",
                                "order": "warning", "problems": "done", "reconstruct": "done",
                                "lookup": "done", "review": "done", "export": "done"}
     outputs = workflow.outputs(project["id"])

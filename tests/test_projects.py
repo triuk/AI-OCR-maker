@@ -54,12 +54,12 @@ def test_projects_are_listed_newest_first(workflow, source_pdf):
     assert [p["id"] for p in workflow.list()] == [second["id"], first["id"]]
 
 
-def test_a_new_project_shows_all_ten_steps_pending_in_workflow_order(workflow, source_pdf):
+def test_a_new_project_shows_all_eleven_steps_pending_in_workflow_order(workflow, source_pdf):
     project = workflow.create(source_pdf)
 
     assert [(s["label"], s["state"]) for s in project["steps"]] == [
-        ("Import", "pending"), ("Příprava obrazu", "pending"), ("Lokální OCR", "pending"),
-        ("Rozvržení", "pending"), ("Pořadí čtení", "pending"), ("Detekce problémů", "pending"),
+        ("Import", "pending"), ("Příprava obrazu", "pending"), ("Rozvržení", "pending"),
+        ("Lokální OCR", "pending"), ("Bloky", "pending"), ("Pořadí čtení", "pending"), ("Detekce problémů", "pending"),
         ("AI rekonstrukce", "pending"), ("Dohledání na webu", "pending"), ("Ruční kontrola", "pending"),
         ("Export", "pending")]
 

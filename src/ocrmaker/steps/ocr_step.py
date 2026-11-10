@@ -70,6 +70,18 @@ def _recover_dropped_regions(recognizer, recognised: dict, raster_path, raster: 
                                     if line["bbox"][3] - line["bbox"][1] >= least])
 
 
+def recognise_page(recognizer, page: dict, raster_path) -> dict:
+    """The page file of a whole prepared page: Tesseract's reading with the lines it dropped read again, narrow
+    spaces split and empty word boxes added (see the module docstring)."""
+    raster = page["raster"]
+    recognised = recognizer.recognize(raster_path, index=page["index"], dpi=sum(raster["dpi"]) / 2,
+                                      to_source=raster["to_source"])
+    recognised = _recover_edge_lines(recognizer, recognised, raster_path, raster)
+    recognised = _recover_dropped_regions(recognizer, recognised, raster_path, raster)
+    recognised = inkgaps.split_narrow_spaces(recognised, raster_path, raster["to_raster"], raster["to_source"])
+    return inkgaps.find_empty_words(recognised, raster_path, raster["to_raster"], raster["to_source"])
+
+
 class OcrStep(Step):
     id = "ocr"
 
@@ -89,14 +101,7 @@ class OcrStep(Step):
                 started = time.monotonic()
                 raster = page["raster"]
                 raster_path = ctx.result(raster["step"]).path(raster["file"])
-                recognised = recognizer.recognize(raster_path, index=page["index"], dpi=sum(raster["dpi"]) / 2,
-                                                  to_source=raster["to_source"])
-                recognised = _recover_edge_lines(recognizer, recognised, raster_path, raster)
-                recognised = _recover_dropped_regions(recognizer, recognised, raster_path, raster)
-                recognised = inkgaps.split_narrow_spaces(recognised, raster_path, raster["to_raster"],
-                                                         raster["to_source"])
-                recognised = inkgaps.find_empty_words(recognised, raster_path, raster["to_raster"],
-                                                      raster["to_source"])
+                recognised = recognise_page(recognizer, page, raster_path)
                 ctx.output.write_json(page_file(page["index"]), recognised)
                 # Word count and mean confidence describe Tesseract's readings; empty word boxes are counted apart.
                 confidences = [word["confidence"] for word in page_words(recognised) if word["text"]]

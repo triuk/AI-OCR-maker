@@ -211,6 +211,11 @@ dialog::backdrop { background: #12232f55; backdrop-filter: blur(3px); }
 .legend-item i.layout-header, .legend-item i.layout-footer { border-color: #d9480f; background: #d9480f1f; }
 .legend-item i.layout-table { border-color: #0c8599; background: #0c85991f; }
 .legend-item i.layout-column { border-color: #6b7a84; border-style: dashed; }
+.legend-item i.layout-ad { border-color: #c2255c; background: #c2255c1f; }
+
+/* Layout (regions) preview: regions use the Layout classes; ink in no region dashed red. */
+.regions-spot { fill: #e0313126; stroke: #e03131; stroke-width: 2; stroke-dasharray: 5 4; }
+.legend-item i.regions-spot { border-color: #e03131; border-style: dashed; background: #e0313126; }
 
 /* Reading order preview: articles numbered in reading order, arrows between their blocks. */
 .order-block { fill-opacity: .14; stroke-width: 1.6; }

@@ -39,6 +39,19 @@ _Avoid_: TXT export, plain text
 The logical sequence in which a person reads the page: whole articles one after another, each flowing through its columns and continuations.
 _Avoid_: Text order, z-order
 
+**Layout region**:
+A rectangle of a page holding one column of one article (of any kind: article, header, footer, ad), read top to bottom in its orientation. A page's layout regions form one sequence in reading order; each either starts an article or continues the previous one (labels `3a`, `3b`). Local OCR recognises each layout region on its own.
+_Avoid_: Block (Layout builds blocks inside a region), part, box; plain "region" (a region note's region is any dragged area)
+
+**Locked region**:
+A layout region the AI must keep as it is (shape, kind, article, relative order) when layout is processed again. Every region starts locked; the user unlocks only the wrong ones.
+
+**Layout round**:
+One automatic layout (A) followed by the user's review of it (M). Rounds repeat for pages with an unlocked region or a layout note until the user approves the whole document's layout.
+
+**Layout note**:
+Text the user writes under a page during layout review, sent to the AI with that page in the next layout round.
+
 **Faithful transcription**:
 The text exactly as printed, including the publisher's own mistakes.
 
