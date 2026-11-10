@@ -89,8 +89,11 @@ findings carry a read-through note, 5 of haiku's 41. Reference corrections added
     remnants and still reads by the sentence. Step: reconstruct (crops).
 14. Visual read-through with a checked candidate (user's idea; targets idea 3, 26 / 21 silent, and part of
     ideas 4 and 13). The read-through sees only text, so misreadings that look plausible as text stay silent
-    ("135" for "11.35", "8," for "8.", "Fůgnera", "Slížková", a wrong case). Give the read-through each
-    line's image next to its OCR text; it names words that disagree with the print or the sentence and gives
+    ("135" for "11.35", "8," for "8.", "Fůgnera", "Slížková", a wrong case). The read-through already gets
+    the whole page's text by article in reading order; give it in addition each paragraph's (Layout block's)
+    image, not each line's (a line alone hides the print's context: typeface, alignment, the lines around it,
+    at a similar token cost; reconstruction already renders paragraph crops). It names words that disagree
+    with the print or the sentence and gives
     the most likely form as a separate `candidate` field (today it is only free text in `reason`, which
     reconstruction gets as a note that is "no evidence"). Reconstruction checks the candidate against its
     crop: the print shows it, or does not contradict it while the context alone determines it -> accept; the
