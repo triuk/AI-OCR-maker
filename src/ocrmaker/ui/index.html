@@ -95,6 +95,11 @@
         <p class="hint">Při nižší jistotě zůstane místo nevyřešené: nečitelné slovo dostane značku <span data-marker></span>, pochybné čtení zůstane, jak ho přečetlo OCR. Návrh AI zůstane jako nápověda pro ruční kontrolu.</p>
       </fieldset>
       <fieldset class="ai-settings">
+        <legend>Rozvržení</legend>
+        <label class="check"><input id="settingsRegions" type="checkbox"> Rozdělit strany na oblasti pomocí AI před OCR (zkušební)</label>
+        <p class="hint">AI rozdělí každou stranu na části (články, záhlaví, zápatí, inzeráty) a jejich sloupce v pořadí čtení. Vypnuté: bloky se skládají z řádků OCR a AI je jen seřadí.</p>
+      </fieldset>
+      <fieldset class="ai-settings">
         <legend>Dohledání na webu</legend>
         <label class="check"><input id="settingsWebLookup" type="checkbox"> Dohledávat nevyřešená místa na webu</label>
         <p class="hint">Krátké cílené dotazy (jména, místa, názvy, čísla) přes webové vyhledávání zvoleného poskytovatele AI. Vypnuté: nevyřešená místa zůstanou, jak jsou (značka <span data-marker></span>, nebo pochybné čtení z OCR).</p>

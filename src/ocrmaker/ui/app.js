@@ -326,6 +326,7 @@ function openSettings() {
   $("settingsDictionary").value = (p.settings.project_dictionary || []).join("\n");
   $("settingsReconstruction").value = p.settings.reconstruction_accept_confidence;
   $("settingsWebLookup").checked = p.settings.web_lookup !== false;
+  $("settingsRegions").checked = p.settings.layout_method === "regions";
   $("settingsDialog").showModal();
 }
 
@@ -336,7 +337,8 @@ async function saveSettings(event) {
     problem_doubtful_confidence: Number($("settingsDoubtful").value),
     project_dictionary: $("settingsDictionary").value,
     reconstruction_accept_confidence: Number($("settingsReconstruction").value),
-    web_lookup: $("settingsWebLookup").checked});
+    web_lookup: $("settingsWebLookup").checked,
+    layout_method: $("settingsRegions").checked ? "regions" : "blocks"});
   $("settingsDialog").close();
   await refresh();
 }

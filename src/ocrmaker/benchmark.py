@@ -46,10 +46,10 @@ from .store import ProjectStore, now
 from .workflow import FINISHED, FIRST_MANUAL, Workflow
 
 TRIAL_VERSION = 1
-LOCAL_STEPS = ("import", "prepare", "ocr", "layout")
+LOCAL_STEPS = ("import", "prepare", "regions", "ocr", "layout")
 AUTOMATIC_STEPS = STEP_IDS[:FIRST_MANUAL]
 # The settings the local steps read; a base is kept per their values.
-LOCAL_SETTINGS = ("language",)
+LOCAL_SETTINGS = ("language", "layout_method")
 PACKAGE = Path(__file__).resolve().parent
 REPOSITORY = PACKAGE.parents[1]
 CORRECTIONS = REPOSITORY / "benchmark" / "corrections"

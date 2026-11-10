@@ -57,14 +57,14 @@ def test_a_project_is_created_from_an_uploaded_pdf_listed_and_opened(client, sou
     assert [(p["id"], p["name"]) for p in listing["projects"]] == [(project["id"], "Zpravodaj 5/2000")]
     opened = client.get(f"/api/projects/{project['id']}").json()
     assert opened["source"]["file_name"] == "zpravodaj-2000-05.pdf"
-    assert [step["state"] for step in opened["steps"]] == ["pending"] * 10
+    assert [step["state"] for step in opened["steps"]] == ["pending"] * 11
 
 
 def test_the_listing_describes_the_ten_workflow_steps_and_the_languages(client):
     listing = client.get("/api/projects").json()
 
     assert [step["label"] for step in listing["steps"]] == [
-        "Import", "Příprava obrazu", "Lokální OCR", "Rozvržení", "Pořadí čtení", "Detekce problémů",
+        "Import", "Příprava obrazu", "Rozvržení", "Lokální OCR", "Bloky", "Pořadí čtení", "Detekce problémů",
         "AI rekonstrukce", "Dohledání na webu", "Ruční kontrola", "Export"]
     assert {"id": "ces", "label": "čeština"} in listing["choices"]["language"]
 
