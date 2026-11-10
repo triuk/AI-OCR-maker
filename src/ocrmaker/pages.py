@@ -112,6 +112,16 @@ def invert(matrix: Matrix) -> list[float]:
     return [ia, ib, ic, id_, -(e * ia + f * ic), -(e * ib + f * id_)]
 
 
+def upright(box: Sequence[float], degrees: int) -> tuple[list[float], float, float]:
+    """The matrix turning a box clockwise (as displayed, y downwards) by a multiple of 90 degrees into an upright
+    frame with the box's top-left corner at the origin, and that frame's width and height: for a layout region
+    whose text reads normally after that turn (its orientation)."""
+    cos, sin = {0: (1, 0), 90: (0, 1), 180: (-1, 0), 270: (0, -1)}[degrees % 360]
+    turn = [cos, sin, -sin, cos, 0, 0]
+    x0, y0, x1, y1 = apply_rect(turn, box)
+    return multiply(turn, [1, 0, 0, 1, -x0, -y0]), x1 - x0, y1 - y0
+
+
 def read_pages(result) -> list[dict]:
     """The page geometry list stored in a step result (Import's, or a later step passing it on)."""
     return result.read_json(PAGES_FILE)["pages"]

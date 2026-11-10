@@ -333,6 +333,35 @@ CONCERT = [Print("title", (40, 40, 380, 60), "Jarní koncert", 16),
                  "škole.")]
 
 
+LAYOUT_STEPS = ("import", "prepare", "regions", "ocr", "layout")
+
+
+def laid_out(tmp_path, items, method="blocks", parts=None):
+    """A page printed from the items, laid out by Layout's blocks method (the whole workflow, no AI) or divided into
+    layout regions first (ADR 0006; the steps up to Layout). `parts` lists the regions' articles, each a list of
+    regions, each a list of item keys; by default one region holds every item."""
+    pdf = printed_pdf(tmp_path / "zpravodaj.pdf", [items])
+    if method == "blocks":
+        workflow = Workflow(ProjectStore(tmp_path / "library"), language=None)
+        return workflow, workflow.run(workflow.create(pdf)["id"])
+    by_key = {item.key: item.rect for item in items}
+
+    def box(keys, pad=4):
+        rects = [by_key[key] for key in keys]
+        x0, y0 = min(r[0] for r in rects) - pad, min(r[1] for r in rects) - pad
+        x1, y1 = max(r[2] for r in rects) + pad, max(r[3] for r in rects) + pad
+        return [round(x0 * 1000 / 420), round(y0 * 1000 / 595), round(x1 * 1000 / 420), round(y1 * 1000 / 595)]
+    answer = {"parts": [{"kind": "article", "title": "", "regions": [{"box": box(keys), "orientation": "0"}
+                                                                    for keys in regions]}
+                        for regions in parts or [[list(by_key)]]]}
+    shipped = implementations()
+    workflow = Workflow(ProjectStore(tmp_path / "library"), language=ScriptedProvider().on("layout_regions", answer),
+                        steps={step: shipped[step] for step in LAYOUT_STEPS})
+    project = workflow.create(pdf)
+    workflow.update_settings(project["id"], {"layout_method": "regions"})
+    return workflow, workflow.run(project["id"])
+
+
 def block_texts(workflow, project, page: int = 0) -> list[tuple[str, str]]:
     """Each Layout block's kind and whole text, in Layout's order."""
     recognised = workflow.result(project["id"], "ocr").read_json(page_file(page))
@@ -342,9 +371,9 @@ def block_texts(workflow, project, page: int = 0) -> list[tuple[str, str]]:
             for block in layout["blocks"]]
 
 
-def test_a_one_word_last_line_of_a_paragraph_stays_in_the_paragraph(tmp_path):
-    workflow = Workflow(ProjectStore(tmp_path / "library"), language=None)
-    project = workflow.run(workflow.create(printed_pdf(tmp_path / "zpravodaj.pdf", [CONCERT]))["id"])
+@pytest.mark.parametrize("method", ["blocks", "regions"])
+def test_a_one_word_last_line_of_a_paragraph_stays_in_the_paragraph(tmp_path, method):
+    workflow, project = laid_out(tmp_path, CONCERT, method)
 
     texts = block_texts(workflow, project)
     assert [kind for kind, _ in texts] == ["heading", "body", "body"]
@@ -359,11 +388,11 @@ BUS = [Print("title", (40, 40, 300, 62), "Do nového domu již jezdí autobus", 
              "vrací se odpoledne ze zastávky u pošty.")]
 
 
-def test_a_heading_over_two_columns_does_not_take_the_first_line_of_one_column(tmp_path):
+@pytest.mark.parametrize("method", ["blocks", "regions"])
+def test_a_heading_over_two_columns_does_not_take_the_first_line_of_one_column(tmp_path, method):
     # The right column's first line, narrow and within the heading's width, looked like the heading's short
     # last line; that exception is meant for a last line Tesseract measures larger, never for smaller text.
-    workflow = Workflow(ProjectStore(tmp_path / "library"), language=None)
-    project = workflow.run(workflow.create(printed_pdf(tmp_path / "zpravodaj.pdf", [BUS]))["id"])
+    workflow, project = laid_out(tmp_path, BUS, method, [[["title"], ["left"], ["right"]]])
 
     texts = block_texts(workflow, project)
     assert texts[0] == ("heading", "Do nového domu již jezdí autobus")
@@ -379,11 +408,12 @@ NEIGHBOURS = [Print("carnival", (40, 40, 172, 60), "Karnevalové show 2000", 13)
                     "očkování psů starších tří měsíců proti vzteklině.")]
 
 
-def test_two_headings_side_by_side_in_different_sizes_are_blocks_of_their_own(tmp_path):
+@pytest.mark.parametrize("method", ["blocks", "regions"])
+def test_two_headings_side_by_side_in_different_sizes_are_blocks_of_their_own(tmp_path, method):
     # Tesseract reads both headings as one line; the gap between them is narrow for their size, but the size
     # changes there, so they are two headings.
-    workflow = Workflow(ProjectStore(tmp_path / "library"), language=None)
-    project = workflow.run(workflow.create(printed_pdf(tmp_path / "zpravodaj.pdf", [NEIGHBOURS]))["id"])
+    workflow, project = laid_out(tmp_path, NEIGHBOURS, method,
+                                 [[["carnival", "carnival text"]], [["vaccination", "vaccination text"]]])
 
     texts = [text for _, text in block_texts(workflow, project)]
     assert "Karnevalové show 2000" in texts and "Povinné očkování psů" in texts
@@ -405,9 +435,9 @@ TIMETABLE = [Print("time1", (40, 40, 75, 54), "11.48"),
              Print("item2", (75, 208, 300, 222), "v pracovních dnech od osmi do šestnácti hodin")]
 
 
-def test_a_time_or_bullet_a_wide_gap_before_its_text_is_read_with_that_text(tmp_path):
-    workflow = Workflow(ProjectStore(tmp_path / "library"), language=None)
-    project = workflow.run(workflow.create(printed_pdf(tmp_path / "zpravodaj.pdf", [TIMETABLE]))["id"])
+@pytest.mark.parametrize("method", ["blocks", "regions"])
+def test_a_time_or_bullet_a_wide_gap_before_its_text_is_read_with_that_text(tmp_path, method):
+    workflow, project = laid_out(tmp_path, TIMETABLE, method)
 
     texts = [text for _, text in block_texts(workflow, project)]
     assert " ".join(texts).split() == words_of(TIMETABLE, [item.key for item in TIMETABLE])
@@ -433,9 +463,9 @@ PROGRAMME = [Print("date1", (40, 40, 100, 54), "2. a 3. 5."),
              Print("value3", (120, 190, 330, 204), "Hřiště u základní školy na sídlišti")]
 
 
-def test_a_column_of_dates_or_form_labels_is_read_row_by_row_with_the_text_beside_it(tmp_path):
-    workflow = Workflow(ProjectStore(tmp_path / "library"), language=None)
-    project = workflow.run(workflow.create(printed_pdf(tmp_path / "zpravodaj.pdf", [PROGRAMME]))["id"])
+@pytest.mark.parametrize("method", ["blocks", "regions"])
+def test_a_column_of_dates_or_form_labels_is_read_row_by_row_with_the_text_beside_it(tmp_path, method):
+    workflow, project = laid_out(tmp_path, PROGRAMME, method)
 
     texts = [text for _, text in block_texts(workflow, project)]
     assert " ".join(texts).split() == words_of(PROGRAMME, [item.key for item in PROGRAMME])
@@ -462,9 +492,9 @@ BIRTHS = [Print("title", (40, 30, 200, 50), "Narodili se", 14),
                 "a radosti do života.")]
 
 
-def test_a_table_under_a_rule_below_its_column_headings_is_read_row_by_row(tmp_path):
-    workflow = Workflow(ProjectStore(tmp_path / "library"), language=None)
-    project = workflow.run(workflow.create(printed_pdf(tmp_path / "zpravodaj.pdf", [BIRTHS]))["id"])
+@pytest.mark.parametrize("method", ["blocks", "regions"])
+def test_a_table_under_a_rule_below_its_column_headings_is_read_row_by_row(tmp_path, method):
+    workflow, project = laid_out(tmp_path, BIRTHS, method)
 
     texts = block_texts(workflow, project)
     assert [text for kind, text in texts if kind == "table"] == [" ".join(cell for row in BIRTH_ROWS for cell in row)]
@@ -486,9 +516,10 @@ RULED_COLUMNS = [Print("a-left", (40, 40, 200, 98), "Obecní zastupitelstvo schv
                        "vyšší soutěže, kde se utkají s týmy z celého kraje.")]
 
 
-def test_a_rule_between_articles_in_columns_is_no_table(tmp_path):
-    workflow = Workflow(ProjectStore(tmp_path / "library"), language=None)
-    project = workflow.run(workflow.create(printed_pdf(tmp_path / "zpravodaj.pdf", [RULED_COLUMNS]))["id"])
+@pytest.mark.parametrize("method", ["blocks", "regions"])
+def test_a_rule_between_articles_in_columns_is_no_table(tmp_path, method):
+    workflow, project = laid_out(tmp_path, RULED_COLUMNS, method,
+                                 [[["a-left", "a-end"]], [["b-left"]], [["c-right", "c-end"]], [["d-right"]]])
 
     texts = [text for kind, text in block_texts(workflow, project) if kind != "table"]
     # Column by column, the geometric order.
