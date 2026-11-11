@@ -1,6 +1,7 @@
 """Generated scans of laid-out pages: text printed into given boxes, so layout and reading order are known.
 
-A page is a list of Print items (and Rule items, printed lines). Each one names its role in the ground truth (`key`), so a test can find the
+A page is a list of Print items (and Rule items, printed lines, and Sketch items, a line of text running out of a
+drawing). Each one names its role in the ground truth (`key`), so a test can find the
 block holding it by its first word and state the expected reading order as a list of keys.
 """
 from __future__ import annotations
@@ -41,7 +42,39 @@ class Rule:
         return []
 
 
-def printed_pdf(path: Path, pages: list[list[Print | Rule]], *, size=(420, 595), dpi: int = 300) -> Path:
+@dataclass(frozen=True)
+class Sketch:
+    """A slanted line of text running out of a drawing, as a handwritten greeting from an illustration: a crossed
+    square as high as `rect` on its left, the text after it on the bottom edge of `rect`, every letter joined to
+    the drawing by a stroke along the baseline. The drawing and the line are one piece of ink, and recognition
+    reads its words with little confidence."""
+    key: str
+    rect: tuple[float, float, float, float]
+    text: str
+    size: float = 12
+    slant: float = 0.6
+
+    @property
+    def words(self) -> list[str]:
+        return self.text.split()
+
+
+def _sketch(page: pymupdf.Page, item: Sketch, font: pymupdf.Font) -> None:
+    x0, y0, _, base = item.rect
+    side = base - y0
+    page.draw_rect((x0, y0, x0 + side, base), color=(0, 0, 0), width=1.0)
+    page.draw_line((x0, y0), (x0 + side, base), color=(0, 0, 0), width=1.0)
+    page.draw_line((x0 + side, y0), (x0, base), color=(0, 0, 0), width=1.0)
+    start = pymupdf.Point(x0 + side + 2, base)
+    writer = pymupdf.TextWriter(page.rect)
+    writer.append(start, item.text, font=font, fontsize=item.size)
+    end = writer.last_point.x
+    assert end <= item.rect[2], f"{item.key} does not fit its box"
+    writer.write_text(page, morph=(start, pymupdf.Matrix(1, 0, -item.slant, 1, 0, 0)))
+    page.draw_line((x0 + side, base - 0.3), (end, base - 0.3), color=(0, 0, 0), width=1.0)
+
+
+def printed_pdf(path: Path, pages: list[list[Print | Rule | Sketch]], *, size=(420, 595), dpi: int = 300) -> Path:
     """A scan PDF: every page one grey raster image of the printed items, no text layer."""
     font = pymupdf.Font(fontbuffer=czech_font_buffer())
     output = pymupdf.open()
@@ -51,6 +84,9 @@ def printed_pdf(path: Path, pages: list[list[Print | Rule]], *, size=(420, 595),
         for item in items:
             if isinstance(item, Rule):
                 page.draw_line(item.rect[:2], item.rect[2:], color=(0, 0, 0), width=item.width)
+                continue
+            if isinstance(item, Sketch):
+                _sketch(page, item, font)
                 continue
             writer = pymupdf.TextWriter(page.rect)
             rect = pymupdf.Rect(item.rect)

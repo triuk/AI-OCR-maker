@@ -10,7 +10,8 @@ Method v8 of the regions prototype (`benchmark/prototypes/regions/regions3.py`),
   3. settle: regions without a recognised word (a rule, an ornament, a lone picture) are dropped;
   4. check against the words of a whole-page Tesseract pass used only for checking: overlaps, words in no or
      several regions, a region edge through a text line, text-like ink in no region (`spots`), two columns in one
-     region; words read off decoration and noise (scan edge, show-through) do not count;
+     region; words read off decoration and noise (scan edge, show-through) do not count, except a row of them in
+     no region that reads as a line of text (`lost_lines`: handwriting-like print, a line joined to a drawing);
   5. at most one corrective request with those problems (previous answer = the snapped boxes); the corrected
      answer is kept unless it has more problems.
 
@@ -88,6 +89,10 @@ SEGMENT_GAP = 1.2      # words closer than this form one segment (a table cell, 
                        # letter-spaced lines stretch word gaps to about one text height)
 DECOR_CONFIDENCE = 85  # OCR confidence (0..100) under which a word over decoration ink is noise; on the test
                        # pages print in frames and headlines reads 91-97, guesses over drawings and ornaments 0-68
+LOST_GAP = 1.5         # words of a lost line lie at most this many text heights apart (a word recognition skipped)
+LOST_WORDS = 3         # a lost line holds at least this many long words, and they are at least half its words; on
+                       # the test pages a lost cursive line has 6 of 8, the fragments read off a dash-dot rule 3 of 28
+WORD_LETTERS = 3       # a long word has at least this many letters
 
 
 INSTRUCTIONS = """\
@@ -551,7 +556,8 @@ class Page:
             # or mostly marks and maybe-letters read with little confidence (text in a frame or a large headline
             # is read with confidence)
             letters, marks, maybe = self.ink.roles_in(w["box"])
-            w["decor"] = not w["noise"] and (marks > letters + maybe or (
+            w["off_marks"] = marks > letters + maybe
+            w["decor"] = not w["noise"] and (w["off_marks"] or (
                 marks + maybe > letters and w["confidence"] < DECOR_CONFIDENCE))
             w["text_word"] = not w["noise"] and not w["decor"]
 
@@ -756,34 +762,38 @@ def _px(ink: Ink, box_pt):
     return apply_rect(ink.to_px, box_pt)
 
 
-def text_lines(blobs: list[dict], th: float) -> list[list[int]]:
-    """Text blobs chained into lines: side by side on one row (vertical overlap of half the lower one, heights
-    within a factor of 2), gaps up to LINE_GAP text heights (word spacing, narrower than a column gutter)."""
-    text = sorted((k for k, b in enumerate(blobs) if b["kind"] == "text"), key=lambda k: blobs[k]["box"][1])
-    root = {k: k for k in text}
+def chained(boxes: dict[int, tuple], joined) -> list[list[int]]:
+    """Items (key -> box) chained into groups, top to bottom: two items whose boxes overlap vertically are linked
+    when `joined(upper box, lower box)` holds (upper by top edge)."""
+    order = sorted(boxes, key=lambda k: boxes[k][1])
+    root = {k: k for k in order}
 
     def find(k):
         while root[k] != k:
             root[k] = root[root[k]]
             k = root[k]
         return k
-    for i, a in enumerate(text):
-        ab = blobs[a]["box"]
-        for b in text[i + 1:]:
-            bb = blobs[b]["box"]
-            if bb[1] >= ab[3]:
+    for n, a in enumerate(order):
+        for b in order[n + 1:]:
+            if boxes[b][1] >= boxes[a][3]:
                 break
-            ha, hb = ab[3] - ab[1], bb[3] - bb[1]
-            if max(ha, hb) > 2 * min(ha, hb):
-                continue
-            if min(ab[3], bb[3]) - max(ab[1], bb[1]) < 0.5 * min(ha, hb):
-                continue
-            if max(bb[0] - ab[2], ab[0] - bb[2]) <= LINE_GAP * th:
+            if joined(boxes[a], boxes[b]):
                 root[find(a)] = find(b)
     groups: dict[int, list[int]] = {}
-    for k in text:
+    for k in order:
         groups.setdefault(find(k), []).append(k)
-    return [g for g in groups.values() if len(g) > 1]
+    return list(groups.values())
+
+
+def text_lines(blobs: list[dict], th: float) -> list[list[int]]:
+    """Text blobs chained into lines: side by side on one row (vertical overlap of half the lower one, heights
+    within a factor of 2), gaps up to LINE_GAP text heights (word spacing, narrower than a column gutter)."""
+    def joined(a, b) -> bool:
+        ha, hb = a[3] - a[1], b[3] - b[1]
+        return (max(ha, hb) <= 2 * min(ha, hb) and min(a[3], b[3]) - max(a[1], b[1]) >= 0.5 * min(ha, hb)
+                and max(b[0] - a[2], a[0] - b[2]) <= LINE_GAP * th)
+    groups = chained({k: b["box"] for k, b in enumerate(blobs) if b["kind"] == "text"}, joined)
+    return [g for g in groups if len(g) > 1]
 
 
 def _at_edge(page: Page, box) -> bool:
@@ -841,6 +851,32 @@ def same_row(a: dict, b: dict) -> bool:
         return False
     gap = max(b["box"][0] - a["box"][2], a["box"][0] - b["box"][2])
     return gap < 1.5 * low
+
+
+def word_rows(page: Page, indices: list[int]) -> list[list[int]]:
+    """Words (indices) chained into rows as the eye reads them, whatever recognition made of its lines: vertical
+    overlap of half the lower word, gaps up to LOST_GAP text heights. Each row runs left to right."""
+    def joined(a, b) -> bool:
+        return (min(a[3], b[3]) - max(a[1], b[1]) >= 0.5 * min(a[3] - a[1], b[3] - b[1])
+                and max(b[0] - a[2], a[0] - b[2]) <= LOST_GAP * page.th)
+    rows = chained({i: page.words[i]["box"] for i in indices}, joined)
+    return [sorted(row, key=lambda i: page.words[i]["box"][0]) for row in rows]
+
+
+def lost_lines(page: Page, member: list[list[int]]) -> list[list[int]]:
+    """Lines of text in no region that the noise filter set aside: rows (`word_rows`) of words in no region (not
+    noise, not read off marks) with at least one decoration word, which read as text: at least LOST_WORDS words
+    of WORD_LETTERS letters or more, and those at least half of the row. Recognition reads handwriting-like print
+    or a line joined to a drawing with little confidence over picture ink, so its words look like decoration; the
+    words recognition reads off a picture or an ornament are short fragments."""
+    loose = [i for i, word in enumerate(page.words) if not member[i] and not word["noise"] and not word["off_marks"]]
+    lines = []
+    for row in word_rows(page, loose):
+        words = [page.words[i] for i in row]
+        long_words = sum(sum(ch.isalpha() for ch in word["text"]) >= WORD_LETTERS for word in words)
+        if any(word["decor"] for word in words) and long_words >= LOST_WORDS and 2 * long_words >= len(words):
+            lines.append(row)
+    return lines
 
 
 def membership(page: Page, regions: list[dict]) -> list[list[int]]:
@@ -951,8 +987,8 @@ def two_columns(page: Page, region: dict, words: list[dict]):
 
 
 def check(page: Page, answer: dict, snapped: dict) -> dict:
-    """Deterministic problems of snapped regions: overlaps, words in no / several regions, uncovered text-like
-    ink, regions holding two columns."""
+    """Deterministic problems of snapped regions: overlaps, words in no / several regions, text lines in no region
+    whose words look like decoration (`lost_lines`), uncovered text-like ink, regions holding two columns."""
     regions = snapped["regions"]
     member = membership(page, regions)
     grid = lambda box: page.to_grid(box)
@@ -972,7 +1008,13 @@ def check(page: Page, answer: dict, snapped: dict) -> dict:
                      else " (no recognised words there, but regions must not overlap)")
             problems.append(line)
             overlaps += 1
-    missing = [i for i, word in enumerate(page.words) if word["text_word"] and not member[i]]
+    lost = lost_lines(page, member)
+    in_lost = {i for line in lost for i in line}
+    for line in lost:
+        box = union([page.words[i]["box"] for i in line])
+        problems.append(f"Text line '{text(line)}' at {where(line)} lies in no region (nearest region "
+                        f"{nearest(box)}); include it in the region of the part it belongs to")
+    missing = [i for i, word in enumerate(page.words) if word["text_word"] and not member[i] and i not in in_lost]
     for group in segments(page, missing, lambda i: 0):
         box = union([page.words[i]["box"] for i in group])
         problems.append(f"Words '{text(group)}' at {where(group)} lie in no region (nearest region {nearest(box)})")
@@ -1014,9 +1056,10 @@ def check(page: Page, answer: dict, snapped: dict) -> dict:
                             f"region per column, and a region of its own for anything above or below that spans "
                             f"both")
     return {"problems": problems,
-            "score": (len(missing) + len(several) + 2 * len(split) + 5 * len(snapped["spots"]) + 10 * len(columns)
-                      + 3 * overlaps),
-            "overlaps": overlaps, "missing": len(missing), "several": len(several), "split": len(split), "spots": len(snapped["spots"]),
+            "score": (len(missing) + len(several) + 2 * len(split) + 5 * (len(snapped["spots"]) + len(lost))
+                      + 10 * len(columns) + 3 * overlaps),
+            "overlaps": overlaps, "missing": len(missing), "lost": len(lost), "several": len(several),
+            "split": len(split), "spots": len(snapped["spots"]),
             "columns": columns, "pictures_outside": len(snapped["pictures"]),
             "noise_words": sum(w["noise"] for w in page.words)}
 

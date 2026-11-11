@@ -186,7 +186,7 @@ class RegionsStep(Step):
                   "regions": len(entry["regions"]),
                   "articles": len({region["article"] for region in entry["regions"]}),
                   "requests": entry["requests"], "chosen": entry["chosen"], "score": entry["check"]["score"],
-                  "spots": len(entry["spots"])} for entry in data["pages"]]
+                  "spots": len(entry["spots"]), "lost": entry["check"].get("lost", 0)} for entry in data["pages"]]
         failed = [page["index"] + 1 for page in pages if page["source"] == "failed"]
         drawn = [page["index"] + 1 for page in pages if page["source"] == "manual"]
         redone = [page["index"] + 1 for page in pages if page["round"] > 1]
@@ -196,7 +196,7 @@ class RegionsStep(Step):
                    f"{rounds} layout round{'' if rounds == 1 else 's'}",
                    f"- pages left with problems after the check: "
                    f"{sum(1 for page in pages if page['score'])}, uncovered ink spots: "
-                   f"{sum(page['spots'] for page in pages)}"]
+                   f"{sum(page['spots'] for page in pages)}, lost text lines: {sum(page['lost'] for page in pages)}"]
         if redone:
             summary.append(f"- laid out again in a later round: pages {redone}")
         if drawn:
