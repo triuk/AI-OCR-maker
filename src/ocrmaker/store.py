@@ -32,6 +32,8 @@ PROJECT_FILE = "project.json"
 SOURCE_FILE = "source.pdf"
 WORKING_FILE = "working.pdf"
 LAYOUT_FILE = "layout.json"
+# Manual correction kinds older versions stored; dropped when the corrections are read (ocrmaker.corrections).
+RETIRED_CORRECTIONS = ("order",)
 
 
 def now() -> str:
@@ -242,8 +244,10 @@ class ProjectStore:
     # Manual corrections ------------------------------------------------------------------------------
 
     def corrections(self, project_id: str) -> list:
+        """The stored manual corrections, without the kinds no longer in use (RETIRED_CORRECTIONS)."""
         path = self.directory(project_id) / "corrections.json"
-        return read_json(path) if path.is_file() else []
+        stored = read_json(path) if path.is_file() else []
+        return [item for item in stored if item.get("kind") not in RETIRED_CORRECTIONS]
 
     def write_corrections(self, project_id: str, corrections: list) -> None:
         write_json_atomic(self.directory(project_id) / "corrections.json", corrections)

@@ -44,8 +44,7 @@ class ReviewStep(Step):
         state = result.read_json(REVIEW_FILE)
         counts = state["counts"]
         texts, notes = layer.text_corrections(corrections), layer.notes(corrections)
-        summary = [f"{len(corrections)} manual corrections ({len(texts)} word texts, {len(notes)} region notes, "
-                   f"{len(layer.of_kind(layer.ORDER, corrections))} article orders); "
+        summary = [f"{len(corrections)} manual corrections ({len(texts)} word texts, {len(notes)} region notes); "
                    f"{counts['markers']} illegible markers, {counts['corrected']} corrected, "
                    f"{counts['remaining']} remaining; {counts.get('doubtful', 0)} doubtful "
                    f"reading{'' if counts.get('doubtful', 0) == 1 else 's'} kept as read."]
@@ -61,11 +60,6 @@ class ReviewStep(Step):
                         f"{item['text']!r}" for item in notes[:REPORTED]]
             if len(notes) > REPORTED:
                 summary.append(f"- and {len(notes) - REPORTED} more (see the report JSON)")
-        orders = layer.of_kind(layer.ORDER, corrections)
-        if orders:
-            summary += ["", "Manual article orders:", ""]
-            summary += [f"- page {item['page'] + 1}: articles {', '.join(item['articles'])} "
-                        f"(automatic: {', '.join(item['previous'])})" for item in orders]
         if state["markers"]:
             summary += ["", "Remaining illegible markers:", ""]
             summary += [f"- page {item['page'] + 1}, {', '.join(item['ids'])}: hint {item['hint']!r}, "

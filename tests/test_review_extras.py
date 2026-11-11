@@ -1,4 +1,4 @@
-"""Seam 1 and 2: the extras of manual review: propagation suggestions, region notes, article reorder and the
+"""Seam 1 and 2: the extras of manual review: propagation suggestions, region notes and the
 optional spot check of accepted reconstructions (all manual corrections, ADR 0004)."""
 from __future__ import annotations
 
@@ -196,49 +196,27 @@ def two_articles(tmp_path_factory):
     return workflow, project
 
 
-def b_then_a() -> list[str]:
-    from layout_pdfs import CROSSING
-    from test_reading_order import words_of
-    return words_of(CROSSING, ["B-head", "B1", "B2", "A-head", "A1", "A2"])
-
-
 def headings(workflow, project) -> list[str]:
     return [line[0]["text"] for item in workflow.review_page(project["id"], 0)["articles"]
             for block in item["blocks"] if block["kind"] == "heading" for line in block["lines"][:1]]
 
 
-def test_a_dragged_article_order_is_the_reading_order_of_the_next_export(two_articles):
-    from test_reading_order import extracted_words, similarity
+def test_an_article_order_kept_by_an_older_project_is_ignored(two_articles):
+    """Reading order is decided in Layout only (#21): manual review no longer reorders articles, and a manual
+    article order an older project stored neither moves an article nor counts as a correction."""
     workflow, project = two_articles
     automatic = [item["id"] for item in workflow.review_page(project["id"], 0)["articles"]]
     assert len(automatic) == 2 and headings(workflow, project) == ["Oprava", "Nové"]
+    workflow.store.write_corrections(project["id"], [
+        {"id": "0123456789ab", "kind": "order", "page": 0, "articles": automatic[::-1], "previous": automatic,
+         "created": "2026-01-01T00:00:00+00:00", "updated": "2026-01-01T00:00:00+00:00"}])
 
-    moved = workflow.reorder_articles(project["id"], 0, automatic[::-1])
-
-    assert (moved["kind"], moved["articles"], moved["previous"]) == ("order", automatic[::-1], automatic)
-    assert headings(workflow, project) == ["Nové", "Oprava"]
-    assert workflow.rerun_impact(project["id"], "order")["corrections"] == 1
+    assert workflow.corrections(project["id"]) == []
+    assert headings(workflow, project) == ["Oprava", "Nové"]
+    assert workflow.rerun_impact(project["id"], "order")["corrections"] == 0
     workflow.export(project["id"])
-    assert similarity(extracted_words(workflow, project), b_then_a()) > 0.95
     _, markdown = exported_text(workflow, project)
-    assert markdown.index("## Nové knihy") < markdown.index("## Oprava školy")
-    assert "page 1: articles" in workflow.report_summary(project["id"])
-
-    assert workflow.reorder_articles(project["id"], 0, automatic) is None  # the automatic order again
-    assert workflow.corrections(project["id"]) == [] and headings(workflow, project) == ["Oprava", "Nové"]
-
-
-def test_an_article_order_must_list_every_article_of_the_page_once(two_articles):
-    workflow, project = two_articles
-    automatic = [item["id"] for item in workflow.review_page(project["id"], 0)["articles"]]
-    for wrong in ([automatic[0]], automatic + automatic[:1], [automatic[0], "p1-a99"]):
-        with pytest.raises(ValueError, match="Nové pořadí musí obsahovat každý článek stránky právě jednou."):
-            workflow.reorder_articles(project["id"], 0, wrong)
+    assert markdown.index("## Oprava školy") < markdown.index("## Nové knihy")
+    assert "0 manual corrections (0 word texts, 0 region notes)" in workflow.report_summary(project["id"])
     client, base = client_for(workflow, project)
-
-    saved = client.put(f"{base}/review/pages/0/order", json={"articles": automatic[::-1]})
-
-    assert saved.status_code == 200 and saved.json()["correction"]["articles"] == automatic[::-1]
-    assert [item["id"] for item in client.get(f"{base}/review/pages/0").json()["articles"]] == automatic[::-1]
-    assert client.put(f"{base}/review/pages/0/order", json={"articles": "p1-a1"}).status_code == 422
-    assert client.delete(f"{base}/corrections/{saved.json()['correction']['id']}").status_code == 200
+    assert client.put(f"{base}/review/pages/0/order", json={"articles": automatic[::-1]}).status_code in (404, 405)

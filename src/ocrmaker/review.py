@@ -75,7 +75,7 @@ class Page:
         self.automatic = transcription.page_words(ctx, self.recognised)
         self.words = layer.apply(self.automatic, self.recognised, corrections)
         order_pages = reading_order(ctx)[0] if order_pages is None else order_pages
-        self.articles = reading_articles(ctx, self.recognised, order_pages, corrections)
+        self.articles = reading_articles(ctx, self.recognised, order_pages)
         self.sequence = [word_id for article in self.articles for block in article["blocks"]
                          for line in block["lines"] for word_id in line]
         self.position = {word_id: number for number, word_id in enumerate(self.sequence)}
@@ -282,18 +282,6 @@ def note(ctx, index: int, bbox, text) -> dict:
     if not (0 <= x0 < x1 <= geometry["width"] and 0 <= y0 < y1 <= geometry["height"]):
         raise ValueError("Oblast poznámky musí ležet na stránce.")
     return {"kind": layer.NOTE, "page": index, "bbox": [x0, y0, x1, y1], "text": " ".join(text.split())}
-
-
-def article_order(ctx, index: int, article_ids) -> dict:
-    """What a manual article order of a page would store (see ocrmaker.corrections): the new order and the
-    automatic one. It must name every article of the page once."""
-    if not 0 <= index < page_count(ctx):
-        raise KeyError("Stránka neexistuje.")
-    automatic = [article["id"] for article in Page(ctx, index, []).articles]
-    if not (isinstance(article_ids, list) and all(isinstance(item, str) for item in article_ids)
-            and len(article_ids) == len(automatic) and set(article_ids) == set(automatic)):
-        raise ValueError("Nové pořadí musí obsahovat každý článek stránky právě jednou.")
-    return {"kind": layer.ORDER, "page": index, "articles": list(article_ids), "previous": automatic}
 
 
 def crop(ctx, index: int, word_id: str) -> bytes:

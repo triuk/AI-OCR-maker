@@ -355,13 +355,6 @@ class Workflow:
             return manual.edit_note(stored, note_id, made["text"])
         return self._change_corrections(project_id, change)
 
-    def reorder_articles(self, project_id: str, page: int, article_ids: list[str]) -> dict | None:
-        """Put a page's articles in a new order (every article id of the page once), applied at Export to both
-        outputs. It replaces the page's earlier manual order; the automatic order removes it. Returns the
-        stored correction or None."""
-        return self._change_corrections(project_id, lambda stored: manual.put_order(
-            stored, review.article_order(self._review(project_id), page, article_ids)))
-
     def revert_correction(self, project_id: str, correction_id: str) -> None:
         """Remove one manual correction; the word is exported as the automatic steps wrote it again."""
         self._change_corrections(project_id, lambda stored: manual.remove(stored, correction_id))

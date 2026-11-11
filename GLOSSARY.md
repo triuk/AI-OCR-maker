@@ -108,7 +108,7 @@ The text of an illegible marker the user has resolved, offered for another illeg
 A note the user attaches to a region dragged on the page during manual review. It is kept with the manual corrections and listed in the report; it changes no text.
 
 **Manual correction**:
-A change the user makes during manual review: a word's text (typed, or an accepted propagation suggestion), a region note, or a page's article order. It is kept apart from step results and applied when the project is exported, so it never causes earlier steps to run again. Running an earlier step again discards all manual corrections.
+A change the user makes during manual review: a word's text (typed, or an accepted propagation suggestion) or a region note. The reading order is not one: it is decided in the layout step. It is kept apart from step results and applied when the project is exported, so it never causes earlier steps to run again. Running an earlier step again discards all manual corrections.
 _Avoid_: Edit, fix (too generic)
 
 ### Evaluation
