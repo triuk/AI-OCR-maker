@@ -5,7 +5,7 @@ import pymupdf
 import pytest
 
 from fakes import ScriptedProvider
-from layout_pdfs import CROSSING, printed_pdf
+from layout_pdfs import CROSSING, LEFT, RIGHT, Print, Sketch, printed_pdf
 from ocrmaker import regions
 from ocrmaker.language import UNAVAILABLE, LanguageError
 from ocrmaker.steps import implementations
@@ -14,7 +14,11 @@ from ocrmaker.store import ProjectStore
 from ocrmaker.workflow import Workflow
 
 SIZE = (420, 595)
-BY_KEY = {item.key: item.rect for item in CROSSING}
+# A letter whose greeting runs out of a drawing between two paragraphs (the 1994 newsletter's "Blahopřání vám všem")
+LETTER = [Print("letter-1", (LEFT[0], 40, RIGHT[1], 120), CROSSING[1].text),
+          Sketch("greeting", (LEFT[0], 128, RIGHT[1], 172), "Blahopřejeme vám všem a hodně zdraví."),
+          Print("letter-2", (LEFT[0], 182, RIGHT[1], 262), CROSSING[3].text)]
+BY_KEY = {item.key: item.rect for item in CROSSING + LETTER}
 
 
 def grid(*keys, pad=4) -> list[int]:
@@ -122,6 +126,21 @@ def test_a_worse_correction_is_refused(tmp_path, pdf):
     assert entry["chosen"] == "first" and labels(entry) == ["1a", "1b", "2a"]
     # the uncovered column stays visible as words in no region
     assert any("Čtenáři mohou" in problem and "in no region" in problem for problem in entry["check"]["problems"])
+
+
+def test_a_line_lost_between_regions_is_reported_back_though_its_words_look_like_decoration(tmp_path):
+    # Recognition reads the greeting with little confidence over the drawing's ink, so its words count as
+    # decoration and not as words in no region; as a line of words it is still lost text.
+    pdf = printed_pdf(tmp_path / "dopis.pdf", [LETTER])
+    lost = {"parts": [part("Dopis", grid("letter-1"), grid("letter-2"))]}
+    whole = {"parts": [part("Dopis", grid("letter-1", "greeting", "letter-2"))]}
+    result, provider, _ = layout(tmp_path, pdf, lost, whole)
+
+    entry = result["pages"][0]
+    first, fix = provider.requests_for(regions.PURPOSE)
+    [problem] = [problem for problem in fix.data["problems"] if problem.startswith("Text line")]
+    assert "všem" in problem and "in no region" in problem
+    assert entry["chosen"] == "fixed" and entry["check"]["lost"] == 0
 
 
 def test_an_invalid_answer_leaves_one_region_over_the_whole_page_and_warns(tmp_path, pdf):
