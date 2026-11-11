@@ -29,6 +29,9 @@ DEFAULTS = {
     # Layout method (ADR 0006): "regions" divides each page into AI layout regions before OCR; "blocks" is the
     # method of ADR 0005 (blocks from Tesseract's lines, grouped by Reading order). "blocks" until benchmarked.
     "layout_method": "blocks",
+    # With layout regions a run stops at Layout until the person approves the layout; on, the AI's layout is
+    # approved at once (batch work, the benchmark).
+    "layout_auto_approve": False,
 }
 
 
@@ -109,6 +112,7 @@ VALIDATORS = {
     "reconstruction_accept_confidence": _confidence,
     "web_lookup": _switch,
     "layout_method": _layout_method,
+    "layout_auto_approve": _switch,
 }
 assert set(VALIDATORS) == set(DEFAULTS)
 

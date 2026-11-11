@@ -1,12 +1,14 @@
 """Project store: one directory per project, written atomically; the source PDF copy is never modified.
 
 Layout of `<root>/projects/<id>/`:
-    project.json          the project file (name, source facts, settings, step states; a benchmark project
+    project.json          the project file (name, source facts, settings, step states, "layout": whether the
+                          layout regions wait for the person or are approved, see Workflow; a benchmark project
                           also has "benchmark": its base key or trial id, see ocrmaker.benchmark)
     source.pdf            a read-only copy of the user's source PDF
     working.pdf           the clean working copy, once an earlier OCR's text layer was removed (read-only)
     steps/<step id>/      the committed result of each step (see ocrmaker.step.StepResult)
     corrections.json      manual corrections, a separate layer applied at export (ADR 0004; ocrmaker.corrections)
+    layout.json           the person's layout edits between layout rounds (ocrmaker.layout_review)
     diagnostics/<run>.jsonl  diagnostic records of one workflow run
     .run.lock             held while a workflow run owns the project
 """
@@ -29,6 +31,7 @@ from .locking import FileLock
 PROJECT_FILE = "project.json"
 SOURCE_FILE = "source.pdf"
 WORKING_FILE = "working.pdf"
+LAYOUT_FILE = "layout.json"
 
 
 def now() -> str:
@@ -244,3 +247,12 @@ class ProjectStore:
 
     def write_corrections(self, project_id: str, corrections: list) -> None:
         write_json_atomic(self.directory(project_id) / "corrections.json", corrections)
+
+    # Layout review -----------------------------------------------------------------------------------
+
+    def layout_edits(self, project_id: str) -> dict:
+        path = self.directory(project_id) / LAYOUT_FILE
+        return read_json(path) if path.is_file() else {"pages": {}}
+
+    def write_layout_edits(self, project_id: str, edits: dict) -> None:
+        write_json_atomic(self.directory(project_id) / LAYOUT_FILE, edits)

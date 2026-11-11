@@ -151,6 +151,30 @@ def create_api(workflow: Workflow, *, token: str | None = None, control=None) ->
     def page_image(project_id: str, page: int):
         return FileResponse(workflow.page_image(project_id, page), media_type="image/png")
 
+    @app.get("/api/projects/{project_id}/layout")
+    def layout(project_id: str):
+        return workflow.layout(project_id)
+
+    @app.put("/api/projects/{project_id}/layout/pages/{page}")
+    def edit_layout(project_id: str, page: int, body: dict):
+        """Save a page's layout at once: {"parts": [...] (ocrmaker.layout_review), "discard_corrections"?}."""
+        return workflow.edit_layout(project_id, page, body.get("parts"),
+                                    discard_corrections=body.get("discard_corrections"))
+
+    @app.put("/api/projects/{project_id}/layout/pages/{page}/note")
+    def layout_note(project_id: str, page: int, body: dict):
+        """Save a page's layout note at once: {"text", "discard_corrections"?}."""
+        return workflow.layout_note(project_id, page, body.get("text"),
+                                    discard_corrections=body.get("discard_corrections"))
+
+    @app.post("/api/projects/{project_id}/layout/process", status_code=202)
+    def process_layout(project_id: str):
+        return workflow.start(project_id, "layout_round")
+
+    @app.post("/api/projects/{project_id}/layout/approve", status_code=202)
+    def approve_layout(project_id: str):
+        return workflow.start(project_id, "layout_approval")
+
     @app.get("/api/projects/{project_id}/review/queue")
     def review_queue(project_id: str, reconstructions: bool = False):
         """Manual review's queue of illegible markers (ocrmaker.review), with ?reconstructions=true followed by

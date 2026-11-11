@@ -34,6 +34,13 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents
   Bloky builds blocks inside each region (`layout.build_regions`) and Reading order takes the articles from the
   regions (`reading_order.region_articles`) and only asks the AI, from the text, which articles continue from the
   previous page (purpose `continuations`, `reading_order.continuation_data`); seam 1 tests `tests/test_region_ocr.py`.
+- Layout rounds: with regions a run stops after Layout while the project's `"layout"` is "waiting" (setting
+  `layout_auto_approve` skips the stop; tests of later steps and the benchmark set it). The person's edits live in
+  `<project>/layout.json` (format and rules in `src/ocrmaker/layout_review.py`), saved at once through
+  `Workflow.edit_layout` / `layout_note`; `Workflow.process_layout` reruns the step as a round (`regions.redo_page`,
+  locked regions kept) and `approve_layout` takes the edits in as drawn and goes on. The step reads the edits and the
+  state through `ctx.layout_review()` and its last round through `ctx.previous_result()`. The editor is
+  `ui/previews/regions.js`. Seam 1 and 2 tests: `tests/test_layout_review.py`.
 - Blocks (Layout's result, word ids per line) are defined in `src/ocrmaker/layout.py`; articles in reading order,
   their kinds and cross-page links (Reading order's result) in `src/ocrmaker/reading_order.py`. Export writes the
   text layer article by article, block by block. Seam 1 tests print laid-out pages with `tests/layout_pdfs.py`.

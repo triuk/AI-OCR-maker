@@ -189,8 +189,9 @@ class Benchmark:
         for project in self.store.list():
             if project.get("benchmark", {}).get("base") == key and self._finished(project["id"], LOCAL_STEPS):
                 return project["id"]
+        # A trial measures the automatic result: the AI's layout regions are approved as they come (no person).
         project = self._local.create(self.documents / name / "source.pdf", name=f"{name} · základ",
-                                     file_name=f"{name}.pdf", settings=local)
+                                     file_name=f"{name}.pdf", settings=local | {"layout_auto_approve": True})
         self.store.mutate(project["id"], lambda doc: doc.update(benchmark={"base": key, "code": code}))
         self._local.run(project["id"])
         if not self._finished(project["id"], LOCAL_STEPS):

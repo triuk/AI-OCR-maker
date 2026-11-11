@@ -60,7 +60,16 @@ async function api(path, method = "GET", body) {
   return response.json();
 }
 async function act(fn) { try { await fn(); } catch (e) { toast(e.message); } }
-window.ocrmaker = {api, apiUrl, esc, plural, toast, refresh: () => refresh()};
+// A preview that must follow the project while it stays open (the layout editor) registers {update(project), dispose()}:
+// update is called with every poll of the project listing, dispose when another step or project replaces it.
+let livePreview = null;
+function disposePreview() {
+  const handle = livePreview;
+  livePreview = null;
+  if (handle) handle.dispose();
+}
+window.ocrmaker = {api, apiUrl, esc, plural, toast, refresh: () => refresh(),
+                   livePreview: handle => { disposePreview(); livePreview = handle; }};
 
 function current() { return projects.find(p => p.id === currentId) || null; }
 function projectStatus(p) {
@@ -133,14 +142,17 @@ function renderWorkspace() {
   renderStepPreview(p);
 }
 
+// The layout regions are done but wait for the person to approve them (ADR 0006): the Layout tile says so.
+const layoutWaiting = (p, s) => s.id === "regions" && p.layout === "waiting" && !p.running && ["done", "warning"].includes(s.state);
 function renderSteps(p) {
   $("steps").innerHTML = p.steps.map((s, index) => {
+    const waiting = layoutWaiting(p, s);
     const left = s.state === "running" ? timeLeft(s.progress) : "";
     const progress = s.state === "running" && s.progress ? `<progress max="${s.progress.total || 1}" value="${s.progress.done}" title="${esc(left)}"></progress>${left ? `<span class="left">${esc(left)}</span>` : ""}` : "";
     const title = [s.implemented ? "" : "Krok zatím není k dispozici.", s.message || ""].filter(Boolean).join("\n");
-    return `<li><button class="step ${s.state} ${s.implemented ? "" : "unavailable"} ${s.id === selectedStep ? "selected" : ""}" data-step="${esc(s.id)}" title="${esc(title)}">
+    return `<li><button class="step ${waiting ? "waiting" : s.state} ${s.implemented ? "" : "unavailable"} ${s.id === selectedStep ? "selected" : ""}" data-step="${esc(s.id)}" title="${esc(title)}">
       <span class="number">${index + 1}</span><span class="label">${esc(s.label)}</span>${progress}
-      <span class="state">${esc(STATE_LABELS[s.state] || s.state)}</span></button></li>`;
+      <span class="state">${esc(waiting ? "Čeká na schválení" : STATE_LABELS[s.state] || s.state)}</span></button></li>`;
   }).join("");
   $("steps").querySelectorAll("[data-step]").forEach(tile => tile.onclick = () => { selectedStep = tile.dataset.step; renderWorkspace(); });
 }
@@ -152,13 +164,15 @@ function renderStepPreview(p) {
   updateRerunButton(p, step);
   if (!step) {
     previewKey = "";
+    disposePreview();
     container.innerHTML = `<p class="placeholder">Klepnutím na krok pracovního postupu otevřete jeho náhled.</p>`;
     return;
   }
   // Re-render only when the step changed, so a preview being zoomed is not reset by polling.
   const key = [p.id, step.id, step.state, step.run_id, step.finished, step.progress && step.progress.done].join("|");
-  if (key === previewKey) return;
+  if (key === previewKey) { if (livePreview) livePreview.update(p); return; }
   previewKey = key;
+  disposePreview();
   const facts = [STATE_LABELS[step.state], step.started && `zahájeno ${dateTime(step.started)}`,
                  step.duration != null && `trvání ${seconds(step.duration)}`,
                  step.progress && `${step.progress.label || ""} ${step.progress.done}/${step.progress.total}`,
@@ -229,13 +243,17 @@ function reviewReady(p, step) {
   return !p.running && before.every(s => !s.implemented || ["done", "warning"].includes(s.state));
 }
 
-// When a run of the open project ends at manual review, the review opens by itself.
+// When a run of the open project ends at the layout approval or at manual review, that step opens by itself.
 let wasRunning = {};
 function openReviewAfterRun() {
   const p = current();
   if (!p) return;
   const review = p.steps.find(s => s.manual && s.implemented);
-  if (wasRunning[p.id] && !p.running && review && review.state === "pending" && reviewReady(p, review)
+  const layout = p.steps.find(s => layoutWaiting(p, s));
+  if (wasRunning[p.id] && layout) {
+    // the run stopped at Layout: the editor opens (also after a layout round)
+    if (selectedStep !== layout.id) selectedStep = layout.id;
+  } else if (wasRunning[p.id] && !p.running && review && review.state === "pending" && reviewReady(p, review)
       && selectedStep !== review.id) selectedStep = review.id;
   wasRunning = Object.fromEntries(projects.map(project => [project.id, project.running]));
 }
@@ -246,7 +264,7 @@ async function refresh() {
   try {
     const data = await api("/projects");
     projects = data.projects; steps = data.steps; choices = data.choices;
-    if (currentId && !current()) { currentId = null; selectedStep = null; }
+    if (currentId && !current()) { currentId = null; selectedStep = null; disposePreview(); }
     $("connection").textContent = "Připojeno"; $("connection").className = "connection online";
     openReviewAfterRun();
     renderProjects(); renderWorkspace();
@@ -327,6 +345,7 @@ function openSettings() {
   $("settingsReconstruction").value = p.settings.reconstruction_accept_confidence;
   $("settingsWebLookup").checked = p.settings.web_lookup !== false;
   $("settingsRegions").checked = p.settings.layout_method === "regions";
+  $("settingsAutoApprove").checked = p.settings.layout_auto_approve === true;
   $("settingsDialog").showModal();
 }
 
@@ -338,7 +357,8 @@ async function saveSettings(event) {
     project_dictionary: $("settingsDictionary").value,
     reconstruction_accept_confidence: Number($("settingsReconstruction").value),
     web_lookup: $("settingsWebLookup").checked,
-    layout_method: $("settingsRegions").checked ? "regions" : "blocks"});
+    layout_method: $("settingsRegions").checked ? "regions" : "blocks",
+    layout_auto_approve: $("settingsAutoApprove").checked});
   $("settingsDialog").close();
   await refresh();
 }

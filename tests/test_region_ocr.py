@@ -25,7 +25,7 @@ def run_local(tmp_path, pdf, *answers, steps=LOCAL):
     workflow = Workflow(ProjectStore(tmp_path / "library"), language=provider,
                         steps={step: shipped[step] for step in steps})
     project = workflow.create(pdf)
-    workflow.update_settings(project["id"], {"layout_method": "regions"})
+    workflow.update_settings(project["id"], {"layout_method": "regions", "layout_auto_approve": True})
     return workflow, workflow.run(project["id"])
 
 
@@ -90,7 +90,7 @@ def test_export_writes_the_articles_in_the_regions_reading_order(tmp_path, cross
     provider = ScriptedProvider().on(regions.PURPOSE, READING).on("readthrough", {"words": []})
     workflow = Workflow(ProjectStore(tmp_path / "library"), language=provider)
     project = workflow.create(crossing_pdf)
-    workflow.update_settings(project["id"], {"layout_method": "regions"})
+    workflow.update_settings(project["id"], {"layout_method": "regions", "layout_auto_approve": True})
     project = run_and_export(workflow, project["id"])
 
     assert {step["id"]: step["state"] for step in project["steps"]}["export"] == "done"
@@ -195,7 +195,7 @@ def continuation(tmp_path_factory):
     provider.on(rules.CONTINUATION_PURPOSE, continued)
     workflow = Workflow(ProjectStore(directory / "library"), language=provider)
     project = workflow.create(printed_pdf(directory / "zpravodaj-2000-05.pdf", RULES))
-    workflow.update_settings(project["id"], {"layout_method": "regions"})
+    workflow.update_settings(project["id"], {"layout_method": "regions", "layout_auto_approve": True})
     return workflow, provider, run_and_export(workflow, project["id"])
 
 
