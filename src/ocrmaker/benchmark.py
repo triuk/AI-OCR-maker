@@ -13,9 +13,11 @@ The benchmark directory (default `<data dir>/benchmark`, apart from the user's o
 Reference corrections, the findings about the reference itself, live in the repository:
 `benchmark/corrections/<name>.json`, a list in the format of evaluation.read_reference.
 
-A base is a project of one document with only the local steps (LOCAL_STEPS) run. It is kept per document
+A base is a project of one document with only the local steps (local_steps) run. It is kept per document
 source, version of the local steps' code and local settings, and every trial starts from a copy of it, so the
-local steps run once per change of their code and not once per configuration.
+local steps run once per change of their code and not once per configuration. With layout regions
+(`layout_method` "regions") the AI decides the layout before OCR, so the base ends with Image preparation and
+each trial runs Layout, Local OCR and Blocks itself; its layout is approved as it comes (`layout_auto_approve`).
 
     {"trial": 1, "id", "created", "label", "document", "commit", "code" (local steps' code version),
      "settings": the full project settings, "base": base project id, "project": trial project id,
@@ -47,6 +49,8 @@ from .workflow import FINISHED, FIRST_MANUAL, Workflow
 
 TRIAL_VERSION = 1
 LOCAL_STEPS = ("import", "prepare", "regions", "ocr", "layout")
+# With layout regions everything from Layout on depends on the AI's answer.
+LOCAL_STEPS_REGIONS = ("import", "prepare")
 AUTOMATIC_STEPS = STEP_IDS[:FIRST_MANUAL]
 # The settings the local steps read; a base is kept per their values.
 LOCAL_SETTINGS = ("language", "layout_method")
@@ -55,10 +59,15 @@ REPOSITORY = PACKAGE.parents[1]
 CORRECTIONS = REPOSITORY / "benchmark" / "corrections"
 
 
-def code_version() -> str:
-    """A digest of the code the local steps run: their modules and every package module those import, in
-    turn. A base is rebuilt when it changes; a change to AI steps or scoring keeps the base."""
-    pending, files = [f"steps.{step}_step" for step in LOCAL_STEPS], {}
+def local_steps(settings: dict) -> tuple[str, ...]:
+    """The steps a base runs for these settings: those whose result no AI configuration changes."""
+    return LOCAL_STEPS_REGIONS if settings["layout_method"] == "regions" else LOCAL_STEPS
+
+
+def code_version(steps: tuple[str, ...] = LOCAL_STEPS) -> str:
+    """A digest of the code the given local steps run: their modules and every package module those import,
+    in turn. A base is rebuilt when it changes; a change to AI steps or scoring keeps the base."""
+    pending, files = [f"steps.{step}_step" for step in steps], {}
     while pending:
         module = pending.pop()
         parts = module.split(".")
@@ -102,8 +111,6 @@ class Benchmark:
         self.corrections = Path(corrections)
         self.store = ProjectStore(self.root / "library")
         self.workflow = Workflow(self.store, language=language)
-        shipped = implementations()
-        self._local = Workflow(self.store, steps={step: shipped[step] for step in LOCAL_STEPS if step in shipped})
 
     # Documents ---------------------------------------------------------------------------------------
 
@@ -156,10 +163,12 @@ class Benchmark:
         return record
 
     def _trial(self, name: str, changes: dict, label: str | None) -> dict:
-        settings = project_settings.merged({}, changes)
+        # A trial measures the automatic result: the AI's layout regions are approved as they come (no person).
+        settings = project_settings.merged({}, changes | {"layout_auto_approve": True})
+        shared = local_steps(settings)
         # The code the trial runs is the one checked out when it starts; a commit made meanwhile is not.
-        code, revision = code_version(), commit()
-        base = self._base(name, settings, code)
+        code, revision = code_version(shared), commit()
+        base = self._base(name, settings, code, shared)
         trial_id = new_run_id()
         project = self.store.duplicate(base, {
             "name": f"{name} · {label or describe(settings)}", "settings": settings,
@@ -175,26 +184,27 @@ class Benchmark:
                   "project": project["id"],
                   "failed": {"step": stopped, "message": states[stopped].get("message")} if stopped else None,
                   "steps": [{"id": step["id"], "state": step["state"], "duration": step["duration"],
-                             "shared": step["id"] in LOCAL_STEPS} for step in report.get("steps", [])],
+                             "shared": step["id"] in shared} for step in report.get("steps", [])],
                   "ai": (report.get("ai") or {}).get("totals")}
         record.update(self._score(project["id"], name))
         write_json_atomic(self.trial_dir / f"{trial_id}.json", record)
         return record
 
-    def _base(self, name: str, settings: dict, code: str) -> str:
+    def _base(self, name: str, settings: dict, code: str, steps: tuple[str, ...]) -> str:
         """The id of the document's base for this code and these local settings, run now if there is none."""
         local = {key: settings[key] for key in LOCAL_SETTINGS}
         source = hashlib.sha256((self.documents / name / "source.pdf").read_bytes()).hexdigest()
         key = hashlib.sha256(json.dumps([name, source, code, local], sort_keys=True).encode()).hexdigest()[:16]
         for project in self.store.list():
-            if project.get("benchmark", {}).get("base") == key and self._finished(project["id"], LOCAL_STEPS):
+            if project.get("benchmark", {}).get("base") == key and self._finished(project["id"], steps):
                 return project["id"]
-        # A trial measures the automatic result: the AI's layout regions are approved as they come (no person).
-        project = self._local.create(self.documents / name / "source.pdf", name=f"{name} · základ",
-                                     file_name=f"{name}.pdf", settings=local | {"layout_auto_approve": True})
+        shipped = implementations()
+        workflow = Workflow(self.store, steps={step: shipped[step] for step in steps})
+        project = workflow.create(self.documents / name / "source.pdf", name=f"{name} · základ",
+                                  file_name=f"{name}.pdf", settings=local)
         self.store.mutate(project["id"], lambda doc: doc.update(benchmark={"base": key, "code": code}))
-        self._local.run(project["id"])
-        if not self._finished(project["id"], LOCAL_STEPS):
+        workflow.run(project["id"])
+        if not self._finished(project["id"], steps):
             raise RuntimeError(f"The local steps of {name} did not finish; see project {project['id']}.")
         return project["id"]
 

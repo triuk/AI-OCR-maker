@@ -39,6 +39,26 @@ def test_trials_share_the_local_steps_and_are_scored_against_the_reference(tmp_p
     assert [trial["id"] for trial in benchmark.trials()] == [first["id"], second["id"]]
 
 
+def test_with_layout_regions_the_trial_itself_runs_layout_and_ocr(tmp_path, language_provider):
+    # The layout regions come from the AI, so they belong to the configuration and not to the shared base.
+    benchmark = Benchmark(tmp_path / "benchmark", language=language_provider)
+    benchmark.add_document("sample", *sample_document(tmp_path))
+    whole_page = {"parts": [{"kind": "article", "title": "", "regions": [
+        {"box": [20, 20, 980, 980], "orientation": "0"}]}]}
+    language_provider.on("layout_regions", whole_page)
+
+    first, = benchmark.run({"ai_provider": "claude", "ai_model": "haiku", "layout_method": "regions"})
+    second, = benchmark.run({"ai_provider": "claude", "ai_model": "sonnet", "layout_method": "regions"})
+
+    assert first["failed"] is None and second["failed"] is None
+    # No person approves a trial's layout: it measures the automatic result.
+    assert first["settings"]["layout_auto_approve"] is True
+    assert first["base"] == second["base"]
+    assert {step["id"] for step in second["steps"] if step["shared"]} == {"import", "prepare"}
+    assert len(language_provider.requests_for("layout_regions")) == 2
+    assert first["totals"]["correct"] == len(f"{SAMPLE_TEXT} (1)".split())
+
+
 def test_a_trial_records_the_commit_it_started_on(tmp_path, language_provider, monkeypatch):
     # Trials run for many minutes; committing the next change meanwhile must not relabel the running trial.
     head = {"commit": "1111111"}
