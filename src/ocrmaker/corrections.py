@@ -5,7 +5,7 @@ Making one never runs a step; rerunning a step before manual review discards the
 what the rerun confirmation states (one correction, one count). Each correction is a dict with:
 
     {"id": "3f9c2a7b1d04",        # stable, unique in the project
-     "kind": "text",              # what it changes: "text", "note" or "order" (below)
+     "kind": "text",              # what it changes: "text" or "note" (below)
      "page": 0,                   # 0-based page index
      "created": iso time, "updated": iso time,
      ...kind-specific fields}
@@ -28,17 +28,14 @@ manual review shows it over the scan and the report lists it.
      "bbox": [x0, y0, x1, y1],    # the region, source page coordinates (ocrmaker.pages), inside the page
      "text": "Ověřit jméno."      # the note, never empty
 
-kind "order" is a manual article order: the page's articles (ocrmaker.reading_order, as
-`steps.export_step.reading_articles` gives them) in the order the user dragged them into. At most one per
-page; both outputs write the page's articles in this order (`ordered`).
-
-     "articles": ["p1-a2", "p1-a1"],    # article ids in the new order
-     "previous": ["p1-a1", "p1-a2"]     # the automatic order when it was made (for the report)
+Older versions also stored kind "order", a manual article order of a page. The reading order is now decided
+in Layout only (ADR 0006), so the store drops such corrections when it reads the list
+(`ocrmaker.store.RETIRED_CORRECTIONS`): they change nothing, count as nothing and leave the file at its next save.
 
 Every correction counts as one, whatever its kind; `apply` ignores kinds it does not write.
 
 Bookkeeping on the stored list (each changes it in place; the caller saves it under the run lock):
-`put_text`, `add_note`, `edit_note`, `put_order` and `remove`. They give new corrections their id and
+`put_text`, `add_note`, `edit_note` and `remove`. They give new corrections their id and
 stamps and keep a replaced correction's id and creation time.
 """
 from __future__ import annotations
@@ -49,7 +46,7 @@ from collections.abc import Iterable
 from .pages import union
 from .store import now
 
-TEXT, NOTE, ORDER = "text", "note", "order"
+TEXT, NOTE = "text", "note"
 SOURCES = ("queue", "word", "suggestion")
 # The manual Review step, and the name under which its result keeps the corrections it handed to Export.
 REVIEW_STEP = "review"
@@ -66,16 +63,6 @@ def text_corrections(corrections: Iterable[dict], page: int | None = None) -> li
 
 def notes(corrections: Iterable[dict], page: int | None = None) -> list[dict]:
     return of_kind(NOTE, corrections, page)
-
-
-def ordered(articles: list[dict], corrections: Iterable[dict], page: int) -> list[dict]:
-    """A page's articles in its manual article order, if it has one; articles it does not name keep their
-    order after those it names."""
-    orders = of_kind(ORDER, corrections, page)
-    if not orders:
-        return articles
-    rank = {article_id: number for number, article_id in enumerate(orders[-1]["articles"])}
-    return sorted(articles, key=lambda article: rank.get(article["id"], len(rank)))
 
 
 def written_words(ids: list[str], text: str, box: list[float]) -> list[dict]:
@@ -166,19 +153,6 @@ def edit_note(stored: list[dict], note_id: str, text: str) -> dict:
     position = stored.index(find(stored, note_id, NOTE))
     stored[position] = {**stored[position], "text": text, "updated": now()}
     return stored[position]
-
-
-def put_order(stored: list[dict], made: dict) -> dict | None:
-    """Store a page's manual article order (kind, page, articles, previous) in place of the page's earlier
-    one; the automatic order only removes it. Returns the stored correction or None."""
-    position = next((n for n, item in enumerate(stored)
-                     if item.get("kind") == ORDER and item["page"] == made["page"]), None)
-    earlier = stored.pop(position) if position is not None else None
-    if made["articles"] == made["previous"]:
-        return None
-    correction = _stamped(made, earlier)
-    stored.insert(len(stored) if position is None else position, correction)
-    return correction
 
 
 def remove(stored: list[dict], correction_id: str) -> None:

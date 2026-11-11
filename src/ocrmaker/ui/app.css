@@ -318,7 +318,7 @@ button.link { border: none; background: none; color: var(--accent); padding: 0 4
 .legend-item i.review-doubtful { border-color: #e67700; background: #f59f0022; border-style: dashed; }
 .queue-chip.doubtful { border-color: #e6770066; }
 .legend-item i.review-manual { border-color: #7048e8; background: #7048e826; }
-/* Manual review extras: region notes, suggestions, the reconstruction filter, the article order list. */
+/* Manual review extras: region notes, suggestions, the reconstruction filter. */
 .review-note { fill: #f59f0012; stroke: #e67700; stroke-width: 2.5; stroke-dasharray: 8 5; pointer-events: stroke; cursor: pointer; }
 .review-note.selected { stroke-width: 4; fill: #f59f0026; }
 .legend-item i.review-note { border-color: #e67700; border-style: dashed; background: #f59f0012; }
@@ -331,13 +331,6 @@ button.link { border: none; background: none; color: var(--accent); padding: 0 4
 .queue-suggestion { border: 1px solid #e6770066; background: #f59f0014; border-radius: 9px; padding: 8px 10px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 13px; }
 .queue-suggestion button { margin-left: auto; }
 .queue-suggestion kbd { font: inherit; font-size: 10px; opacity: .75; margin-left: 4px; }
-.article-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; counter-reset: article; }
-.article-list li { display: flex; gap: 8px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; background: var(--paper); cursor: grab; counter-increment: article; }
-.article-list li::before { content: counter(article) "."; color: var(--muted); font-size: 12px; min-width: 18px; }
-.article-list li.dragging { opacity: .5; }
-.article-list li.drop { border-color: var(--accent); }
-.article-grip { color: var(--muted); }
-.article-label { flex: 1; min-width: 0; font-size: 13px; }
 .note-input { width: 100%; font: inherit; resize: vertical; }
 .note-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
 

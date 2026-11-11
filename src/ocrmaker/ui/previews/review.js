@@ -4,8 +4,8 @@
 // the text, and corrected. A manual correction is saved at once and applied at export; it never runs a step
 // (ADR 0004). The queue: type the text and press Ctrl+Enter to save it and move on to the next marker; it
 // can optionally continue through the accepted reconstructions for a spot check. A resolved marker's text is
-// offered as a one-click suggestion for the markers that match it (propagation). The Články tab reorders the
-// page's articles by dragging, the Poznámky tab lists region notes, dragged on the scan in note mode.
+// offered as a one-click suggestion for the markers that match it (propagation). The Poznámky tab lists
+// region notes, dragged on the scan in note mode.
 (function () {
   const {pageViewer, box, api, apiUrl, esc, plural, toast} = window.ocrmaker;
   const MODES = {layout: "Rozvržení", order: "Pořadí čtení", confidence: "Důvěra"};
@@ -27,7 +27,6 @@
                        {label: "pochybné čtení", cls: "review-doubtful"}, {label: "ruční oprava", cls: "review-manual"},
                        {label: "poznámka", cls: "review-note"}];
   const MATCHES = {reading: "podobné částečné čtení", context: "stejný kontext"};
-  const KINDS = {article: "článek", ad: "inzerát", header: "záhlaví", footer: "zápatí", caption: "popisek"};
   const percent = value => (value == null ? "–" : `${Math.round(value)} %`);
   const quoted = text => (text ? `„${text}“` : "(prázdný rámeček)");
   let mode = "layout";  // kept while the app is open
@@ -49,12 +48,10 @@
         <div class="review-tabs" role="tablist">
           <button type="button" role="tab" data-tab="queue">Fronta</button>
           <button type="button" role="tab" data-tab="text">Text stránky</button>
-          <button type="button" role="tab" data-tab="articles">Články</button>
           <button type="button" role="tab" data-tab="notes">Poznámky</button>
         </div>
         <div class="review-panel" data-panel="queue"></div>
         <div class="review-panel" data-panel="text" hidden></div>
-        <div class="review-panel" data-panel="articles" hidden></div>
         <div class="review-panel" data-panel="notes" hidden></div>
       </div>
     </div>`;
@@ -83,7 +80,6 @@
     const correctionOf = (page, target) => state.corrections.find(item => item.kind === "text" && item.page === page
                                                                     && item.ids.includes(target)) || null;
     const current = () => state.queue.items[state.position] || null;
-    const orderOf = page => state.corrections.find(item => item.kind === "order" && item.page === page) || null;
 
     // Saving ---------------------------------------------------------------------------------------
     async function save(page, word, text, source) {
@@ -91,7 +87,7 @@
       await afterChange(page);
       return answer;
     }
-    // Save another change of the correction layer (a suggestion, a note, an article order) and refresh.
+    // Save another change of the correction layer (a suggestion, a note) and refresh.
     async function change(page, path, method, body) {
       const answer = await api(`${base}${path}`, method, body);
       await afterChange(page);
@@ -114,7 +110,7 @@
       if (mode === "layout") {
         for (const block of overlay.blocks || []) box(block.bbox, {class: `layout-block layout-${block.kind}`}, layer);
       } else if (mode === "order") {
-        // The article numbers follow the order the export will write, a manual article order included.
+        // The article numbers follow the order the export will write.
         const position = Object.fromEntries(view.articles.map((article, number) => [article.id, number]));
         const articles = [...overlay.articles || []].sort((a, b) => (position[a.id] ?? a.number) - (position[b.id] ?? b.number));
         articles.filter(item => item.kind === "article").forEach((item, number) => item.number = number + 1);
@@ -148,7 +144,6 @@
     async function load(index) {
       const [view, overlay] = await Promise.all([pageView(index), modeOverlay(index)]);
       if (state.tab === "text") renderText(view);
-      if (state.tab === "articles") renderArticles(view);
       if (state.tab === "notes") renderNotes(view);
       return {view, mode: overlay};
     }
@@ -327,59 +322,6 @@
       state.selected = {page, target};
       if (state.tab !== "text") showTab("text");
       else state.viewer.redraw();
-    }
-
-    // Article order: drag the page's articles (or move them with the arrows); saved at once, applied at export.
-    function renderArticles(view) {
-      const panel = $('[data-panel="articles"]');
-      const manual = orderOf(view.index);
-      const label = article => {
-        const text = article.blocks.flatMap(block => block.lines.flat()).map(word => word.text).filter(Boolean);
-        return text.slice(0, 9).join(" ") + (text.length > 9 ? " …" : "") || "(bez textu)";
-      };
-      panel.innerHTML = `<p class="hint">Přetažením změníte pořadí článků na stránce ${view.index + 1}. Nové pořadí je ruční oprava;
-          export podle něj zapíše OCR PDF i text článků.</p>
-        <ol class="article-list">${view.articles.map((article, index) => `<li draggable="true" data-article="${esc(article.id)}">
-          <span class="article-grip" aria-hidden="true">⠿</span>
-          <span class="article-label"><span class="hint">${esc(KINDS[article.kind] || article.kind)}</span> ${esc(label(article))}</span>
-          <button type="button" class="link" data-move="-1" ${index === 0 ? "disabled" : ""} aria-label="Výš">↑</button>
-          <button type="button" class="link" data-move="1" ${index === view.articles.length - 1 ? "disabled" : ""} aria-label="Níž">↓</button>
-        </li>`).join("")}</ol>
-        ${manual ? `<div class="queue-actions"><span class="hint">Pořadí je ručně změněné.</span>
-          <button type="button" class="push-left" data-automatic>Obnovit automatické pořadí</button></div>` : ""}`;
-      const ids = view.articles.map(article => article.id);
-      async function store(order) {
-        try {
-          await change(view.index, `/review/pages/${view.index}/order`, "PUT", {articles: order});
-          await state.viewer.redraw();
-        } catch (error) { toast(error.message); }
-      }
-      let dragged = null;
-      panel.querySelectorAll("[data-article]").forEach(item => {
-        item.ondragstart = event => { dragged = item.dataset.article; event.dataTransfer.effectAllowed = "move"; item.classList.add("dragging"); };
-        item.ondragend = () => item.classList.remove("dragging");
-        item.ondragover = event => { event.preventDefault(); item.classList.add("drop"); };
-        item.ondragleave = () => item.classList.remove("drop");
-        item.ondrop = event => {
-          event.preventDefault();
-          item.classList.remove("drop");
-          if (!dragged || dragged === item.dataset.article) return;
-          const order = ids.filter(id => id !== dragged);
-          const rect = item.getBoundingClientRect();
-          const at = order.indexOf(item.dataset.article) + (event.clientY > rect.top + rect.height / 2 ? 1 : 0);
-          order.splice(at, 0, dragged);
-          store(order);
-        };
-        item.querySelectorAll("[data-move]").forEach(button => button.onclick = () => {
-          const order = [...ids], from = order.indexOf(item.dataset.article), to = from + Number(button.dataset.move);
-          [order[from], order[to]] = [order[to], order[from]];
-          store(order);
-        });
-      });
-      const automatic = panel.querySelector("[data-automatic]");
-      if (automatic) automatic.onclick = async () => {
-        try { await revert(view.index, manual); await state.viewer.redraw(); } catch (error) { toast(error.message); }
-      };
     }
 
     // Region notes: drag a region on the scan in note mode, then write the note here.

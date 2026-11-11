@@ -218,11 +218,6 @@ def create_api(workflow: Workflow, *, token: str | None = None, control=None) ->
             raise ValueError("Přijetí návrhu potřebuje stránku a slovo.")
         return {"correction": workflow.accept_suggestion(project_id, body["page"], body["word"])}
 
-    @app.put("/api/projects/{project_id}/review/pages/{page}/order")
-    def reorder_articles(project_id: str, page: int, body: dict):
-        """Save a page's manual article order: {"articles": [every article id of the page, in the new order]}."""
-        return {"correction": workflow.reorder_articles(project_id, page, body.get("articles"))}
-
     @app.post("/api/projects/{project_id}/review/notes")
     def add_note(project_id: str, body: dict):
         """Attach a region note: {"page", "bbox" [x0, y0, x1, y1] in source page coordinates, "text"}."""
