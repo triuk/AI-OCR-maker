@@ -5,10 +5,10 @@ import pymupdf
 import pytest
 
 from fakes import ScriptedProvider, answer_spots, run_and_export
-from layout_pdfs import CROSSING, CROSSING_COLUMNS, CROSSING_READING, RULES, Print, printed_pdf
+from layout_pdfs import CROSSING, CROSSING_COLUMNS, CROSSING_READING, LEFT, RIGHT, RULES, Print, printed_pdf
 from ocrmaker import reading_order as rules
 from ocrmaker import regions
-from ocrmaker.steps import implementations
+from ocrmaker.steps import implementations, ocr_step
 from ocrmaker.store import ProjectStore
 from ocrmaker.words import page_file
 from ocrmaker.workflow import Workflow
@@ -61,6 +61,71 @@ def test_local_ocr_reads_each_region_on_its_own_inside_its_box(tmp_path, crossin
     texts = " ".join(word["text"] for line in page["lines"] for word in line["words"]).split()
     for item in CROSSING:
         assert item.words[0] in texts
+
+
+IMPRINT = Print("imprint", (LEFT[0], 540, RIGHT[1], 562), "Vydává město Rychvald. Šéfredaktor: Tadeusz Siwek. "
+                "Adresa redakce: Městský úřad Rychvald, Orlovská 678. Tisk: KarTis.", 8, inverse=True)
+
+
+def test_an_imprint_on_a_black_bar_is_read_once_in_its_region(tmp_path):
+    # Each region is read on its own and the whole page once more (the words only the page reading finds are
+    # taken over); where both readings find a word it must not come out twice.
+    pdf = printed_pdf(tmp_path / "zpravodaj-2000-05.pdf", [CROSSING + [IMPRINT]])
+    x0, y0, x1, y1 = IMPRINT.rect
+    bar = [round((x0 - 6) * 1000 / 420), round((y0 - 6) * 1000 / 595), round((x1 + 6) * 1000 / 420),
+           round((y1 + 6) * 1000 / 595)]
+    answer = {"parts": READING["parts"] + [part("Vydává město Rychvald", bar, kind="footer")]}
+    workflow, project = run_local(tmp_path, pdf, answer, steps=("import", "prepare", "regions", "ocr"))
+
+    found = {region["id"]: region for region in page_regions(workflow, project)}
+    footer = list(found.values())[-1]
+    assert footer["kind"] == "footer"
+    page = recognised(workflow, project)
+    read = [word["text"] for line in page["lines"] if line["region"] == footer["id"] for word in line["words"]]
+    assert read == IMPRINT.text.split()
+    texts = [word["text"] for line in page["lines"] for word in line["words"] if word["text"]]
+    assert len(texts) == sum(len(item.text.split()) for item in CROSSING + [IMPRINT])
+    for line in page["lines"]:
+        for word in line["words"]:
+            assert inside(word["bbox"], found[line["region"]]["bbox"]), word
+
+
+def word(text, x0, y0, x1, y1) -> dict:
+    return {"id": "", "text": text, "bbox": [x0, y0, x1, y1], "confidence": 90.0, "chars": []}
+
+
+def line(region, *words) -> dict:
+    boxes = [item["bbox"] for item in words]
+    return {"id": "", "region": region, "baseline": None, "block": 0, "paragraph": 0, "words": list(words),
+            "bbox": [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes),
+                     max(b[3] for b in boxes)]}
+
+
+def test_a_region_takes_over_the_words_only_the_whole_page_reading_found():
+    # Alone on its canvas a region can read worse than on the page: on the 2000 newsletter Tesseract dropped the
+    # years in the binding's shadow at a region's edge and an imprint's white letters on their black bar, though
+    # the page reading has a word or an empty word box there.
+    layout_regions = [{"id": "p1-r1", "bbox": [0, 0, 100, 100], "orientation": "0"},
+                      {"id": "p1-r2", "bbox": [110, 0, 200, 100], "orientation": "0"},
+                      {"id": "p1-r3", "bbox": [0, 110, 200, 200], "orientation": "90"}]
+    read = [line("p1-r1", word("Bohumil", 10, 10, 40, 20), word("Blahoš", 44, 10, 70, 20)),
+            line("p1-r3", word("Inzerce", 10, 120, 20, 190))]
+    whole = {"index": 0, "lines": [
+        # the page reading's line runs across both regions; its first two words the region has itself
+        line(None, word("Bohumil", 10, 10, 40, 20), word("Blahos", 45, 10, 70, 20), word("1924", 80, 10, 96, 20),
+             word("Sokol", 120, 10, 150, 20), word("", 155, 10, 170, 20)),
+        line(None, word("Zemřeli", 10, 50, 50, 60)),
+        line(None, word("%%", 60, 150, 90, 160)),      # in a turned region the page reading is no evidence
+        line(None, word("smítko", 102, 205, 108, 210))]}  # in no region
+
+    lines = ocr_step.with_page_words(read, whole, layout_regions)
+
+    assert [(item["region"], [w["text"] for w in item["words"]]) for item in lines] == [
+        ("p1-r1", ["Bohumil", "Blahoš", "1924"]),  # on the row of a line the region read: joins that line
+        ("p1-r1", ["Zemřeli"]),
+        ("p1-r2", ["Sokol", ""]),
+        ("p1-r3", ["Inzerce"])]
+    assert lines[0]["bbox"] == [10, 10, 96, 20] and lines[2]["bbox"] == [120, 10, 170, 20]
 
 
 def test_blocks_are_built_inside_each_region_in_the_regions_order(tmp_path, crossing_pdf):
