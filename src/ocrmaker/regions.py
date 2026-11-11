@@ -14,22 +14,37 @@ Method v8 of the regions prototype (`benchmark/prototypes/regions/regions3.py`),
   5. at most one corrective request with those problems (previous answer = the snapped boxes); the corrected
      answer is kept unless it has more problems.
 
+A later layout round (`redo_page`) asks again with the person's layout of the page (`ocrmaker.layout_review`):
+every region labelled as the person sees it ("3b") and locked or not, plus the layout note. The answer lists the
+whole page again and names in "keep" each current region it keeps; a locked region is taken over exactly (page box,
+orientation, its part's kind, title and continuation), never snapped and never dropped, and it keeps its order and
+part (`resolve`). An answer that breaks a lock gets the corrective request too; one that still breaks it is refused.
+Approval (`drawn_page`) takes the person's layout as drawn: every region fixed, only checked.
+
 Geometry: boxes are kept in grid units of the page (0..1000 along each side of the source page extent) and in
 source page coordinates (`pt`). Pages with a /Rotate other than 0 are not handled specially yet.
 
 The Layout regions result (`steps/regions/`, see `ocrmaker.steps.regions_step`) holds per page
-    {"index": 0, "method": "regions", "source": "ai" | "empty" | "failed", "reason": str | None,
+    {"index": 0, "method": "regions", "source": "ai" | "failed" | "manual", "reason": str | None,
+     "round": 1,                              # the layout round that last laid the page out
+     "note": str | None,                      # the layout note sent with the page in that round
      "regions": [{"id": "p1-r1", "article": 1, "column": 1, "continues": false,    # continues the previous region's article
+                  "part": 1,                                                         # the part as the AI or person gave it
                   "kind": "article", "title": "...", "orientation": "0",
                   "box": [gx0, gy0, gx1, gy1],                                      # grid units
                   "bbox": [x0, y0, x1, y1]}],                                       # source page coordinates
+     "proposal": [regions],                   # only on a page approved as the person drew it ("manual"): the
+                                              # AI's regions of that round, as above
      "spots": [[x0, y0, x1, y1]],             # text-like ink in no region, source page coordinates
      "check": {...},                          # the final check's counts and problems (English)
-     "requests": int, "chosen": "first" | "fixed"}
+     "requests": int, "chosen": "first" | "fixed" | None}
+Several parts form one article when a part continues the previous one (the person's "J"); `article` numbers the
+articles, `part` the parts, `column` counts the regions of an article.
 """
 from __future__ import annotations
 
 import bisect
+import copy
 import statistics
 from pathlib import Path
 
@@ -151,6 +166,29 @@ SCHEMA = {
                                        "minItems": 4, "maxItems": 4},
                                "orientation": {"type": "string",
                                                "enum": ["0", "90", "180", "270", "stacked"]}}}}}}}}}
+
+REDO_PURPOSE = "layout_redo"
+REDO = """
+
+Redoing
+When the data holds "current_layout", a person has checked an earlier division of this page. Each of its regions \
+has an "id" as the person sees it (the part's number, and a letter in a part of several regions: "3b" is the second \
+region of part 3) and "locked". Answer with the whole page again, every part and region in reading order, and give \
+every region a "keep": the id of the current region it keeps as it is (its box and orientation are then taken from \
+the current layout), or "" for a new or redrawn region.
+- Keep every locked region, each exactly once: locked regions stay in their order and in the same parts as now \
+(locked regions of one part in one part, of different parts in different parts); new regions may join their parts.
+- The unlocked regions are the ones the person found wrong: redraw, split, join or reorder them, or keep one that is \
+right after all.
+- With no unlocked region, only add regions for printed text that no region holds yet.
+- "note", when not empty, is the person's note about this page: follow it.
+New and redrawn regions follow all the rules above."""
+REDO_INSTRUCTIONS = INSTRUCTIONS.replace("\n\nAnswer only with JSON", REDO + "\n\nAnswer only with JSON")
+assert REDO_INSTRUCTIONS != INSTRUCTIONS
+REDO_SCHEMA = copy.deepcopy(SCHEMA)
+_REDO_REGION = REDO_SCHEMA["properties"]["parts"]["items"]["properties"]["regions"]["items"]
+_REDO_REGION["properties"] = {"keep": {"type": "string"}, **_REDO_REGION["properties"]}
+_REDO_REGION["required"] = ["keep", "box", "orientation"]
 
 
 
@@ -533,9 +571,11 @@ class Page:
 
 
 def regions_of(answer: dict) -> list[dict]:
-    """Flat list of regions: label "p.r", part index, box in grid units, orientation."""
+    """Flat list of regions: label "p.r", part index, box in grid units, orientation, and for a region kept as the
+    person left it its page box (`fixed`)."""
     return [{"label": f"{p + 1}.{r + 1}", "part": p, "box": region["box"],
-             "orientation": region.get("orientation", "0")}
+             "orientation": region.get("orientation", "0"),
+             **({"fixed": tuple(region["fixed"])} if region.get("fixed") else {})}
             for p, part in enumerate(answer["parts"]) for r, region in enumerate(part["regions"])]
 
 
@@ -631,6 +671,11 @@ def snap(page: Page, answer: dict) -> dict:
     pad = PAD * th
     for r, region in enumerate(regions):
         box = owned_box(r)
+        if region.get("fixed"):   # kept as the person left it: owns its ink, but is never snapped
+            region["pt"] = region["fixed"]
+            if box is not None:
+                region["ink"] = box
+            continue
         if box is None:   # no ink at all: keep the AI's box
             region["pt"] = page.to_page(region["box"])
             region["empty"] = True
@@ -674,10 +719,13 @@ def snap(page: Page, answer: dict) -> dict:
 def separate(regions: list[dict], th: float) -> None:
     """Overlapping boxes of two regions whose ink lies apart along one axis (up to TOUCH text heights of
     overlap: a descender above an ascender) get one common edge midway between their ink. Overlaps where the
-    ink of the two interleaves stay for the correction request."""
+    ink of the two interleaves stay for the correction request. A fixed region never moves: the other region's
+    edge alone gives way, up to the fixed edge or its own ink."""
     for a in regions:
         for b in regions:
             if a is b or "ink" not in a or "ink" not in b or not intersection(a["pt"], b["pt"]):
+                continue
+            if a.get("fixed") and b.get("fixed"):
                 continue
             options = []
             for lo, hi in ((0, 2), (1, 3)):          # x, then y
@@ -690,9 +738,17 @@ def separate(regions: list[dict], th: float) -> None:
             _, lo, hi, first, second = max(options, key=lambda o: o[0])
             if first["pt"][hi] <= second["pt"][lo]:
                 continue
-            edge = (first["ink"][hi] + second["ink"][lo]) / 2
+            if first.get("fixed"):
+                edge = min(first["pt"][hi], second["ink"][lo])
+            elif second.get("fixed"):
+                edge = max(second["pt"][lo], first["ink"][hi])
+            else:
+                edge = (first["ink"][hi] + second["ink"][lo]) / 2
             low, high = list(first["pt"]), list(second["pt"])
-            low[hi], high[lo] = min(low[hi], edge), max(high[lo], edge)
+            if not first.get("fixed"):
+                low[hi] = min(low[hi], edge)
+            if not second.get("fixed"):
+                high[lo] = max(high[lo], edge)
             first["pt"], second["pt"] = tuple(low), tuple(high)
 
 
@@ -739,15 +795,16 @@ def _at_edge(page: Page, box) -> bool:
 def settle(page: Page, answer: dict) -> tuple[dict, dict, list[str]]:
     """Snap the answer and drop its regions without text: no recognised word in the snapped box (a rule, an
     ornament, a dotted line, a picture on its own; a picture inside a framed box stays with the box's region). A region stays when dropping it would leave text-like ink
-    uncovered (lettering the recognition did not read). A part left without regions goes. Returns the answer,
-    its snapped regions and the labels of the dropped regions."""
+    uncovered (lettering the recognition did not read). A fixed region (kept as the person left it) always stays.
+    A part left without regions goes. Returns the answer, its snapped regions and the labels of the dropped
+    regions."""
     snapped = snap(page, answer)
     dropped, spots = [], len(snapped["spots"])
     # a confidently read word counts even where it has no counted ink (white letters on a black bar)
     text = [w for w in page.words
             if w["text_word"] or (w["real"] and not w["decor"] and w["confidence"] >= DECOR_CONFIDENCE)]
     for region in list(snapped["regions"]):
-        if any(contains(region["pt"], w["c"]) for w in text):
+        if region.get("fixed") or any(contains(region["pt"], w["c"]) for w in text):
             continue
         p, r = (int(v) - 1 for v in region["label"].split("."))
         shift = sum(1 for label in dropped if label.startswith(f"{p + 1}.") and int(label.split(".")[1]) <= r + 1)
@@ -763,12 +820,13 @@ def settle(page: Page, answer: dict) -> tuple[dict, dict, list[str]]:
 
 
 def snapped_answer(page: Page, answer: dict, snapped: dict) -> dict:
-    """The answer with every box replaced by its snapped box (grid units, rounded outward)."""
+    """The answer with every box replaced by its snapped box (grid units, rounded outward); a redo answer's regions
+    keep their "keep"."""
     regions = iter(snapped["regions"])
-    return {"parts": [{**part, "regions": [{"box": page.to_grid(next(regions)["pt"], outward=True),
-                                            "orientation": region.get("orientation", "0")}
-                                           for region in part["regions"]]}
-                      for part in answer["parts"]]}
+    return {"parts": [{"kind": part["kind"], "title": part.get("title", ""), "regions": [
+        {**({"keep": region["keep"]} if "keep" in region else {}),
+         "box": page.to_grid(next(regions)["pt"], outward=True), "orientation": region.get("orientation", "0")}
+        for region in part["regions"]]} for part in answer["parts"]]}
 
 
 # ---------------------------------------------------------------- check
@@ -978,8 +1036,9 @@ def grid_units(answer: dict, image: Path) -> bool:
 
 # ---------------------------------------------------------------- one page
 
-def answer_problems(answer) -> list[str]:
-    """Why an answer does not match the schema (English, empty when valid)."""
+def answer_problems(answer, known=frozenset()) -> list[str]:
+    """Why an answer does not match the schema (English, empty when valid). A region that keeps one of the `known`
+    current regions needs no box of its own."""
     if not isinstance(answer, dict) or not isinstance(answer.get("parts"), list):
         return ["the answer has no list of parts"]
     problems = []
@@ -992,6 +1051,8 @@ def answer_problems(answer) -> list[str]:
             problems.append(f"part {p} has no regions")
             continue
         for r, region in enumerate(regions, start=1):
+            if isinstance(region, dict) and region.get("keep") and region["keep"] in known:
+                continue
             box = region.get("box") if isinstance(region, dict) else None
             if not (isinstance(box, list) and len(box) == 4
                     and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in box)
@@ -1003,10 +1064,15 @@ def answer_problems(answer) -> list[str]:
 
 
 def _normalised(answer: dict) -> dict:
-    """The answer with boxes clipped to the grid and orientations as strings."""
+    """The answer with boxes clipped to the grid and orientations as strings (a redo answer's "keep" as a string)."""
+    def box(region):
+        value = region.get("box")
+        if isinstance(value, list) and len(value) == 4 and all(isinstance(v, (int, float)) for v in value):
+            return [min(SCALE, max(0, v)) for v in value]
+        return [0, 0, 0, 0]   # a kept region's own box is not used
     return {"parts": [{"kind": part["kind"], "title": str(part.get("title") or ""),
-                       "regions": [{"box": [min(SCALE, max(0, v)) for v in region["box"]],
-                                    "orientation": str(region.get("orientation", "0"))}
+                       "regions": [{**({"keep": str(region.get("keep") or "")} if "keep" in region else {}),
+                                    "box": box(region), "orientation": str(region.get("orientation", "0"))}
                                    for region in part["regions"]]}
                       for part in answer["parts"]]}
 
@@ -1017,15 +1083,19 @@ def whole_page(page: Page) -> dict:
 
 
 def page_regions(page: Page, answer: dict, snapped: dict) -> list[dict]:
-    """The settled answer as one sequence of layout regions in reading order (see the module docstring)."""
+    """The settled answer as one sequence of layout regions in reading order (see the module docstring); a part
+    that continues the previous one ("continues", the person's join) adds its regions to that part's article."""
     boxes = iter(snapped["regions"])
-    regions = []
+    regions, article, column = [], 0, 0
     for number, part in enumerate(answer["parts"], start=1):
-        for column, region in enumerate(part["regions"], start=1):
+        if not (part.get("continues") and article):
+            article, column = article + 1, 0
+        for region in part["regions"]:
             pt = next(boxes)["pt"]
-            regions.append({"id": f"p{page.n}-r{len(regions) + 1}", "article": number, "column": column,
-                            "continues": column > 1, "kind": part["kind"], "title": part.get("title", ""),
-                            "orientation": region.get("orientation", "0"),
+            column += 1
+            regions.append({"id": f"p{page.n}-r{len(regions) + 1}", "article": article, "column": column,
+                            "continues": column > 1, "part": number, "kind": part["kind"],
+                            "title": part.get("title", ""), "orientation": region.get("orientation", "0"),
                             "box": page.to_grid(pt, outward=True), "bbox": [round(v, 2) for v in pt]})
     return regions
 
@@ -1036,8 +1106,8 @@ def layout_page(page: Page, ask, image: Path) -> dict:
     ask(data, image) returns the AI's parsed answer, or None when it was not asked (AI unavailable); it raises
     ValueError with the reason for an invalid answer. Without a usable first answer the page gets one region over
     the whole page (`source` "failed" with the reason)."""
-    entry = {"index": page.n - 1, "method": "regions", "source": "ai", "reason": None, "requests": 0,
-             "chosen": "first"}
+    entry = {"index": page.n - 1, "method": "regions", "source": "ai", "reason": None, "round": 1, "note": None,
+             "requests": 0, "chosen": "first"}
     first = None
     try:
         first = ask("Split this page into regions.", image)
@@ -1078,6 +1148,165 @@ def layout_page(page: Page, ask, image: Path) -> dict:
     entry["spots"] = [[round(v, 2) for v in spot["box"]] for spot in final_snap["spots"]]
     entry["check"] = found
     return entry
+
+
+# ---------------------------------------------------------------- later rounds: the person's layout
+
+def grid_box(bbox, width: float, height: float) -> list[float]:
+    """A page box (source page coordinates) in grid units, precise enough to give the same page box back."""
+    return [round(v * SCALE / size, 4) for v, size in zip(bbox, (width, height) * 2)]
+
+
+def page_box(box, width: float, height: float) -> list[float]:
+    """A grid box in source page coordinates, rounded as the result keeps them."""
+    return [round(v * size / SCALE, 2) for v, size in zip(box, (width, height) * 2)]
+
+
+def layout_parts(regions: list[dict], width: float, height: float) -> list[dict]:
+    """A page's layout regions as the parts the person edits (`ocrmaker.layout_review`), every region locked."""
+    parts, previous = [], None
+    for region in regions:
+        number = region.get("part", region["article"])
+        if not parts or number != previous:
+            parts.append({"kind": region["kind"], "title": region.get("title", ""),
+                          "continues": bool(parts) and region["article"] == parts[-1]["article"],
+                          "article": region["article"], "regions": []})
+            previous = number
+        parts[-1]["regions"].append({"box": grid_box(region["bbox"], width, height),
+                                     "orientation": region["orientation"], "locked": True})
+    for part in parts:
+        del part["article"]
+    return parts
+
+
+def region_labels(parts: list[dict]) -> list[list[str]]:
+    """The labels the person sees, per part: its number, with a letter in a part of several regions ("3b")."""
+    def label(number, index, count):
+        return str(number) if count == 1 else f"{number}{chr(97 + index) if index < 26 else f'.{index + 1}'}"
+    return [[label(number, index, len(part["regions"])) for index in range(len(part["regions"]))]
+            for number, part in enumerate(parts, start=1)]
+
+
+def redo_data(parts: list[dict], note: str) -> dict:
+    """The data of a later round's request: the person's layout with its labels and locks, and the layout note."""
+    labels = region_labels(parts)
+    return {"task": "Redo the layout of this page.",
+            "current_layout": {"parts": [
+                {"kind": part["kind"], "title": part["title"], "regions": [
+                    {"id": label, "box": [round(v) for v in region["box"]], "orientation": region["orientation"],
+                     "locked": region["locked"]} for label, region in zip(labels[p], part["regions"])]}
+                for p, part in enumerate(parts)]},
+            "note": note}
+
+
+def resolve(page: Page, answer: dict, parts: list[dict]) -> tuple[dict, list[str]]:
+    """A normalised redo answer with its kept regions taken from the person's layout `parts`: a kept region gets its
+    current box and orientation, a locked one also its page box (`fixed`) and its part's kind, title and
+    continuation. Returns that answer and how it breaks the locks (English, empty when it keeps them)."""
+    labels = region_labels(parts)
+    current = {label: (p, region) for p, part in enumerate(parts) for label, region in zip(labels[p], part["regions"])}
+    locked = [label for label, (_, region) in current.items() if region["locked"]]
+    problems, seen, placed, sequence, resolved = [], set(), {}, [], []
+    width, height = page.rect.width, page.rect.height
+    for part in answer["parts"]:
+        regions, owner = [], None
+        for region in part["regions"]:
+            keep = region.get("keep") or ""
+            if keep not in current:
+                regions.append({"box": region["box"], "orientation": region["orientation"], "keep": ""})
+                continue
+            if keep in seen:
+                problems.append(f"Region {keep} is listed twice: list every kept region once")
+                continue
+            seen.add(keep)
+            p, kept = current[keep]
+            item = {"box": kept["box"], "orientation": kept["orientation"], "keep": keep}
+            if kept["locked"]:
+                item["fixed"] = page_box(kept["box"], width, height)
+                placed[keep] = len(resolved)
+                sequence.append(keep)
+                owner = p if owner is None else owner
+            regions.append(item)
+        if not regions:
+            continue
+        source = parts[owner] if owner is not None else part
+        resolved.append({"kind": source["kind"], "title": source.get("title", ""),
+                         "continues": bool(owner is not None and parts[owner].get("continues")), "regions": regions})
+    missing = [label for label in locked if label not in placed]
+    if missing:
+        problems.append(f"Locked regions {', '.join(missing)} are missing: list each of them once, with its id in "
+                        f"\"keep\"")
+    present = [label for label in locked if label in placed]
+    if sequence != present:
+        problems.append(f"Locked regions must stay in their order: {', '.join(present)}")
+    else:
+        for a, b in zip(sequence, sequence[1:]):
+            together = current[a][0] == current[b][0]
+            if together and placed[a] != placed[b]:
+                problems.append(f"Locked regions {a} and {b} belong to one part: keep them in one part")
+            elif not together and placed[a] == placed[b]:
+                problems.append(f"Locked regions {a} and {b} belong to different parts: keep them in different parts")
+    return {"parts": resolved}, problems
+
+
+def redo_page(page: Page, ask, image: Path, parts: list[dict], note: str) -> tuple[dict | None, str | None]:
+    """One page's layout regions redone around the person's layout `parts` (a later layout round, see the module
+    docstring). ask(data, image) as in `layout_page`, with the redo instructions and schema. Returns the result
+    entry, or None with the reason when the AI gave no answer that keeps the locks (the page then stays as the
+    person left it)."""
+    entry = {"index": page.n - 1, "method": "regions", "source": "ai", "reason": None, "note": note or None,
+             "requests": 0, "chosen": "first"}
+    known = {label for labels in region_labels(parts) for label in labels}
+    data = redo_data(parts, note)
+
+    def attempt(request):
+        try:
+            answer = ask(request, image)
+        except ValueError as exc:
+            entry["requests"] += 1
+            return None, str(exc)
+        if answer is None:
+            return None, "the AI was not asked"
+        entry["requests"] += 1
+        if problems := answer_problems(answer, known):
+            return None, "; ".join(problems)
+        grid_units(answer, image)
+        resolved, broken = resolve(page, _normalised(answer), parts)
+        settled, snapped, _ = settle(page, resolved)
+        return (settled, snapped, check(page, settled, snapped), broken), None
+
+    best, reason = attempt(data)
+    if best is None:
+        return None, reason
+    settled, snapped, found, broken = best
+    if broken or found["score"]:
+        fixed, _ = attempt({**data, "task": "Correct your previous answer.",
+                            "previous_answer": snapped_answer(page, settled, snapped),
+                            "problems": broken + found["problems"]})
+        if fixed is not None and not fixed[3] and (broken or fixed[2]["score"] <= found["score"]):
+            best, entry["chosen"] = fixed, "fixed"
+    settled, snapped, found, broken = best
+    if broken:
+        return None, f"the answer did not keep the locked regions: {'; '.join(broken)}"
+    entry["regions"] = page_regions(page, settled, snapped)
+    entry["spots"] = [[round(v, 2) for v in spot["box"]] for spot in snapped["spots"]]
+    entry["check"] = found
+    return entry, None
+
+
+def drawn_page(page: Page, parts: list[dict]) -> dict:
+    """A page's layout as the person drew it (`parts`), every region kept exactly and only checked; the result
+    entry of an approved page the person changed (source "manual")."""
+    width, height = page.rect.width, page.rect.height
+    answer = {"parts": [{"kind": part["kind"], "title": part["title"], "continues": part["continues"],
+                         "regions": [{"box": region["box"], "orientation": region["orientation"],
+                                      "fixed": page_box(region["box"], width, height)}
+                                     for region in part["regions"]]} for part in parts]}
+    snapped = snap(page, answer)
+    return {"index": page.n - 1, "method": "regions", "source": "manual", "reason": None, "requests": 0,
+            "chosen": None, "regions": page_regions(page, answer, snapped),
+            "spots": [[round(v, 2) for v in spot["box"]] for spot in snapped["spots"]],
+            "check": check(page, answer, snapped)}
 
 
 def region_degrees(region: dict) -> int:

@@ -16,12 +16,14 @@ from pathlib import Path
 from typing import Any
 
 from . import corrections as manual
-from . import existing_text, providers, report, review
+from . import existing_text, layout_review, providers, report, review
 from . import settings as project_settings
 from .diagnostics import Diagnostics, new_run_id
 from .errors import Conflict, ConfirmationRequired, StepError, StepInterrupted
+from .files import read_json
 from .language import LanguageError, LanguageProvider, LanguageProviders, LanguageSession
-from .pages import PAGES_STEP, read_pages
+from .pages import PAGES_STEP, PREPARED_STEP, read_pages
+from .regions import REGIONS_FILE, REGIONS_STEP
 from .steps.export_step import OUTPUTS
 from .pdf import inspect_source
 from .step import Step, StepContext, StepOutput, StepResult
@@ -35,6 +37,10 @@ REMOVE_ACTION = existing_text.REMOVE_ACTION
 PROGRESS_INTERVAL = 0.25
 # Manual corrections belong to the review; rerunning a step before it discards them (ADR 0004).
 FIRST_MANUAL = next(index for index, definition in enumerate(STEPS) if definition.manual)
+# The project's "layout" (ADR 0006): the layout regions wait for the person (a run stops after Layout) or are
+# approved; None while there are none (the blocks method, or Layout not run yet).
+WAITING, APPROVED = layout_review.WAITING, layout_review.APPROVED
+AFTER_LAYOUT = STEP_IDS[STEP_IDS.index(REGIONS_STEP) + 1:]
 # The Check AI request: as small as a request can be, and still a structured one like the steps send.
 CHECK_INSTRUCTIONS = "This is a connection check. Answer with the JSON object {\"ok\": true} and nothing else."
 CHECK_SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"],
@@ -148,13 +154,27 @@ class Workflow:
         """
         return self._operate(project_id, lambda: self._plan_remove_text_layer(project_id))
 
+    def process_layout(self, project_id: str) -> dict:
+        """A layout round ("Zpracovat"): ask the AI again for the pages whose layout edit has an unlocked region or
+        a layout note, keeping their locked regions; the run then stops at Layout again. Refused (ValueError) when
+        no page has one, or when the layout does not wait for the person."""
+        return self._operate(project_id, lambda: self._plan_layout_round(project_id), operation="layout_round")
+
+    def approve_layout(self, project_id: str) -> dict:
+        """Approve the whole document's layout ("Schválit"): Layout takes every page the person changed as drawn,
+        and the run goes on with the steps after it."""
+        return self._operate(project_id, lambda: self._plan_layout_approval(project_id),
+                             operation="layout_approval")
+
     def start(self, project_id: str, operation: str = "run", **options) -> dict:
-        """Start run, export, rerun (with step_id, discard_corrections) or remove_text_layer in the background.
+        """Start run, export, rerun (with step_id, discard_corrections), remove_text_layer, layout_round or
+        layout_approval in the background.
 
         Refusals (a run in progress, a needed confirmation, nothing to run) are raised here, synchronously.
         """
         plans = {"run": self._plan_run, "export": self._plan_export, "rerun": self._plan_rerun,
-                 REMOVE_ACTION: self._plan_remove_text_layer}
+                 REMOVE_ACTION: self._plan_remove_text_layer, "layout_round": self._plan_layout_round,
+                 "layout_approval": self._plan_layout_approval}
         if operation not in plans:
             raise ValueError("Neznámá operace pracovního postupu.")
         return self._operate(project_id, lambda: plans[operation](project_id, **options), background=True,
@@ -357,6 +377,94 @@ class Workflow:
         finally:
             lock.release()
 
+    # Layout review (ocrmaker.layout_review): the person's half of a layout round ---------------------
+
+    def layout(self, project_id: str) -> dict:
+        """The layout editor's view of every page's layout regions:
+        {"state": the project's "layout", "round", "running", "process": [indices of the pages the next round
+         sends], "discards": manual corrections an edit would discard (after approval), "kept": [pages the last
+         round could not redo, with the reason], "pages": [{"index", "width", "height" (source page coordinates),
+         "round", "source", "reason", "parts" (as the person sees them), "proposal" (the AI's), "edited", "note",
+         "sent_note" (the note of the page's round), "process", "spots" (uncovered ink, grid units)}]}.
+        ValueError (Czech) while the project has no layout regions."""
+        project = self.store.get(project_id)
+        data = self._layout_data(project_id)
+        edits = self.store.layout_edits(project_id)
+        waiting = project.get("layout") == WAITING
+        return {"state": project.get("layout"), "round": data.get("round", 1), "running": self.running(project_id),
+                "process": layout_review.to_process(edits, data["pages"]),
+                "discards": 0 if waiting else len(self.store.corrections(project_id)),
+                "kept": data.get("kept", []),
+                "pages": [layout_review.page_view(entry, layout_review.current(edits, entry), page)
+                          for entry, page in zip(data["pages"], self._prepared_pages(project_id))]}
+
+    def edit_layout(self, project_id: str, page: int, parts: list, *, discard_corrections: int | None = None) -> dict:
+        """Save one page's layout as the person left it (the parts of ocrmaker.layout_review) at once, without
+        running a step; returns the page's view. After approval it withdraws the approval and makes the steps after
+        Layout stale, discarding the manual corrections (ADR 0004): their count must be passed as
+        discard_corrections, otherwise ConfirmationRequired is raised and nothing changes."""
+        parts = layout_review.validated(parts)
+        return self._change_layout(project_id, page, discard_corrections,
+                                   lambda edits, entry: layout_review.put_parts(edits, entry, parts))
+
+    def layout_note(self, project_id: str, page: int, text: str, *, discard_corrections: int | None = None) -> dict:
+        """Save one page's layout note, sent with the page in the next layout round; as edit_layout otherwise."""
+        text = layout_review.validated_note(text)
+        return self._change_layout(project_id, page, discard_corrections,
+                                   lambda edits, entry: layout_review.put_note(edits, entry, text))
+
+    def _change_layout(self, project_id: str, page: int, discard_corrections: int | None,
+                       change: Callable[[dict, dict], Any]) -> dict:
+        lock = self._lock(project_id)
+        try:
+            data = self._layout_data(project_id)
+            if not 0 <= page < len(data["pages"]):
+                raise KeyError("Stránka neexistuje.")
+            self._withdraw_approval(project_id, discard_corrections)
+            edits = self.store.layout_edits(project_id)
+            entry = data["pages"][page]
+            change(edits, entry)
+            self.store.write_layout_edits(project_id, edits)
+            return layout_review.page_view(entry, layout_review.current(edits, entry),
+                                           self._prepared_pages(project_id)[page])
+        finally:
+            lock.release()
+
+    def _withdraw_approval(self, project_id: str, discard_corrections: int | None) -> None:
+        """An edit after approval: the layout waits for the person again and every step after it starts anew.
+        A project laid out before layout rounds existed (no "layout") went on without approval: the same holds."""
+        if self.store.get(project_id).get("layout") == WAITING:
+            return
+        corrections = len(self.store.corrections(project_id))
+        if corrections and discard_corrections != corrections:
+            raise ConfirmationRequired(
+                f"Úprava rozvržení po schválení zahodí {corrections} "
+                f"{_plural(corrections, 'ruční opravu', 'ruční opravy', 'ručních oprav')}.", corrections)
+        self.store.write_corrections(project_id, [])
+        self._invalidate(project_id, AFTER_LAYOUT)
+        self.store.mutate(project_id, lambda project: project.update(layout=WAITING))
+
+    def _layout_data(self, project_id: str) -> dict:
+        """The Layout regions result as the last round left it, also while a round runs or after one failed."""
+        result = self._stored_result(project_id, REGIONS_STEP)
+        if result is None or not result.exists(REGIONS_FILE):
+            raise ValueError("Rozvržení zatím není k dispozici. Spusťte nejprve zpracování.")
+        data = result.read_json(REGIONS_FILE)
+        if data["method"] != "regions":
+            raise ValueError("Projekt nepoužívá rozvržení oblastmi (nastavení metody rozvržení).")
+        return data
+
+    def _layout_waiting(self, project_id: str) -> dict:
+        state = self.store.get(project_id).get("layout")
+        if state != WAITING:
+            raise ValueError("Rozvržení je už schválené." if state == APPROVED
+                             else "Rozvržení zatím není k dispozici. Spusťte nejprve zpracování.")
+        return self._layout_data(project_id)
+
+    def _prepared_pages(self, project_id: str) -> list[dict]:
+        result = self.result(project_id, PREPARED_STEP)
+        return read_pages(result) if result else []
+
     # AI ----------------------------------------------------------------------------------------------
 
     def check_ai(self, project_id: str, changes: dict | None = None) -> dict:
@@ -422,6 +530,22 @@ class Workflow:
                 self._run_automatic(project_id, run_id, stop)
             else:
                 self._run_sequence(project_id, run_id, stop, STEPS[FIRST_MANUAL:])
+        return work
+
+    def _plan_layout_round(self, project_id: str) -> Callable[[str, threading.Event], None]:
+        data = self._layout_waiting(project_id)
+        if not layout_review.to_process(self.store.layout_edits(project_id), data["pages"]):
+            raise ValueError("Není co zpracovat: žádná strana nemá odemčenou oblast ani poznámku.")
+        return lambda run_id, stop: self._run_sequence(project_id, run_id, stop, [DEFINITIONS[REGIONS_STEP]])
+
+    def _plan_layout_approval(self, project_id: str) -> Callable[[str, threading.Event], None]:
+        self._layout_waiting(project_id)
+
+        def work(run_id, stop):
+            self.store.mutate(project_id, lambda project: project.update(layout=APPROVED))
+            self._run_sequence(project_id, run_id, stop, [DEFINITIONS[REGIONS_STEP]])
+            if self.store.get(project_id)["steps"][REGIONS_STEP]["state"] in FINISHED:
+                self._run_automatic(project_id, run_id, stop)
         return work
 
     def _plan_remove_text_layer(self, project_id: str) -> Callable[[str, threading.Event], None]:
@@ -507,9 +631,11 @@ class Workflow:
             step = self.steps.get(definition.id)
             if step is None:
                 continue
-            if skip_finished and self.store.get(project_id)["steps"][definition.id]["state"] in FINISHED:
-                continue
-            if stop.is_set() or self._execute(project_id, run_id, stop, definition, step) not in FINISHED:
+            if not (skip_finished and self.store.get(project_id)["steps"][definition.id]["state"] in FINISHED):
+                if stop.is_set() or self._execute(project_id, run_id, stop, definition, step) not in FINISHED:
+                    return
+            # the first stop of a run: layout regions wait for the person (ADR 0006)
+            if definition.id == REGIONS_STEP and self.store.get(project_id).get("layout") == WAITING:
                 return
 
     def _execute(self, project_id: str, run_id: str, stop: threading.Event, definition: StepDefinition,
@@ -549,7 +675,10 @@ class Workflow:
             results=lambda step_id: self.result(project_id, step_id), progress=progress, stopped=stop.is_set,
             record=lambda kind, **data: diagnostics.record(run_id, kind, **data),
             source_name=project["source"]["file_name"],
-            corrections=lambda: self.store.corrections(project_id))
+            corrections=lambda: self.store.corrections(project_id),
+            previous=lambda: self._stored_result(project_id, definition.id),
+            layout_review=lambda: {"state": self.store.get(project_id).get("layout"),
+                                   "edits": self.store.layout_edits(project_id)})
         error = action = None
         try:
             step.run(context)
@@ -569,6 +698,9 @@ class Workflow:
         finally:
             shutil.rmtree(staging, ignore_errors=True)
         finished, duration = now(), round(time.monotonic() - clock, 3)
+        laid_out = definition.id == REGIONS_STEP and state in FINISHED
+        divided = laid_out and read_json(self.store.result_dir(project_id, REGIONS_STEP) / REGIONS_FILE)["method"] \
+            == "regions"
 
         def end(project):
             entry = project["steps"][definition.id]
@@ -577,6 +709,12 @@ class Workflow:
                 entry.update(started=None, run_id=None)
             else:
                 entry.update(finished=finished, duration=duration)
+            if laid_out:
+                # The first round waits for the person unless the setting approves it; later ones keep the state.
+                if not divided:
+                    project["layout"] = None
+                elif project.get("layout") is None:
+                    project["layout"] = APPROVED if settings["layout_auto_approve"] else WAITING
         self.store.mutate(project_id, end)
         diagnostics.record(run_id, "step", step=definition.id, started=started, finished=finished,
                            duration=duration, outcome=outcome, message=message, warnings=context.warnings,
@@ -598,13 +736,23 @@ class Workflow:
             traceback.print_exc(file=sys.stderr)
 
     def _invalidate(self, project_id: str, step_ids) -> None:
+        """Discard the steps' results; Layout's goes with the person's layout edits and approval."""
         for step_id in step_ids:
             self.store.discard_result(project_id, step_id)
+        if REGIONS_STEP in step_ids:
+            self.store.write_layout_edits(project_id, layout_review.empty())
 
         def change(project):
             for step_id in step_ids:
                 project["steps"][step_id] = _pending_step()
+            if REGIONS_STEP in step_ids:
+                project["layout"] = None
         self.store.mutate(project_id, change)
+
+    def _stored_result(self, project_id: str, step_id: str) -> StepResult | None:
+        """A step's last committed result whatever its state now (a round that runs or failed keeps the last)."""
+        directory = self.store.result_dir(project_id, step_id)
+        return StepResult(directory) if directory.is_dir() else None
 
     # Helpers -----------------------------------------------------------------------------------------
 
@@ -659,4 +807,4 @@ class Workflow:
         steps = [{"id": d.id, "label": d.label, "manual": d.manual, "implemented": d.id in self.steps,
                   **project["steps"].get(d.id, _pending_step())} for d in STEPS]
         return ({key: value for key, value in project.items() if key != "steps"}
-                | {"steps": steps, "running": self.running(project["id"])})
+                | {"steps": steps, "running": self.running(project["id"]), "layout": project.get("layout")})

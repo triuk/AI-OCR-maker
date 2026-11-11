@@ -358,7 +358,7 @@ def laid_out(tmp_path, items, method="blocks", parts=None):
     workflow = Workflow(ProjectStore(tmp_path / "library"), language=ScriptedProvider().on("layout_regions", answer),
                         steps={step: shipped[step] for step in LAYOUT_STEPS})
     project = workflow.create(pdf)
-    workflow.update_settings(project["id"], {"layout_method": "regions"})
+    workflow.update_settings(project["id"], {"layout_method": "regions", "layout_auto_approve": True})
     return workflow, workflow.run(project["id"])
 
 
