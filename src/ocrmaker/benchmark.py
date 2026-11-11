@@ -19,10 +19,10 @@ local steps run once per change of their code and not once per configuration. Wi
 (`layout_method` "regions") the AI decides the layout before OCR, so the base ends with Image preparation and
 each trial runs Layout, Local OCR and Blocks itself; its layout is approved as it comes (`layout_auto_approve`).
 
-    {"trial": 1, "id", "created", "label", "document", "commit", "code" (local steps' code version),
+    {"trial": 1, "id", "created", "label", "document", "commit", "code" (code version of the base's steps),
      "settings": the full project settings, "base": base project id, "project": trial project id,
      "failed": {"step", "message"} of the step that stopped the run, or null,
-     "steps": [{"id", "state", "duration", "shared" (from the base)}],
+     "steps": [{"id", "state", "duration", "shared" (from the base: one of local_steps(settings))}],
      "ai": the run report's AI totals, "review": the review queue counts (null without an export),
      "corrections": digest of the reference corrections scored with,
      "totals", "pages", "findings": the score (evaluation.compare)}
@@ -52,7 +52,7 @@ LOCAL_STEPS = ("import", "prepare", "regions", "ocr", "layout")
 # With layout regions everything from Layout on depends on the AI's answer.
 LOCAL_STEPS_REGIONS = ("import", "prepare")
 AUTOMATIC_STEPS = STEP_IDS[:FIRST_MANUAL]
-# The settings the local steps read; a base is kept per their values.
+# The settings that decide a base: what its steps read, and which steps it has.
 LOCAL_SETTINGS = ("language", "layout_method")
 PACKAGE = Path(__file__).resolve().parent
 REPOSITORY = PACKAGE.parents[1]
@@ -64,7 +64,7 @@ def local_steps(settings: dict) -> tuple[str, ...]:
     return LOCAL_STEPS_REGIONS if settings["layout_method"] == "regions" else LOCAL_STEPS
 
 
-def code_version(steps: tuple[str, ...] = LOCAL_STEPS) -> str:
+def code_version(steps: tuple[str, ...]) -> str:
     """A digest of the code the given local steps run: their modules and every package module those import,
     in turn. A base is rebuilt when it changes; a change to AI steps or scoring keeps the base."""
     pending, files = [f"steps.{step}_step" for step in steps], {}

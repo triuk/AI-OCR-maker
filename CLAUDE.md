@@ -30,7 +30,8 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents
 - Layout regions (ADR 0006; step `regions`, label Rozvržení, before Local OCR) are defined in `src/ocrmaker/regions.py`
   (method v8 of `benchmark/prototypes/regions/`) and run by `src/ocrmaker/steps/regions_step.py`; the setting
   `layout_method` ("blocks" default, "regions") switches them on. Seam 1 tests: `tests/test_regions.py`.
-  With regions, Local OCR reads each region on its own (`ocr_step.recognise_regions`, lines name their region),
+  With regions, Local OCR reads each region on its own (`ocr_step.recognise_regions`, lines name their region;
+  words only the whole page's reading found are taken over, `with_page_words`),
   Bloky builds blocks inside each region (`layout.build_regions`) and Reading order takes the articles from the
   regions (`reading_order.region_articles`) and only asks the AI, from the text, which articles continue from the
   previous page (purpose `continuations`, `reading_order.continuation_data`); seam 1 tests `tests/test_region_ocr.py`.
