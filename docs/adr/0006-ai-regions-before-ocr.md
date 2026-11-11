@@ -7,7 +7,7 @@ prototype, `benchmark/prototypes/regions/`) returns the page's articles of kind 
 reading order, each as one or more regions: rectangles holding one column of one article, read top to bottom, with an
 orientation. Regions are snapped to the ink they own and checked against a throwaway whole-page Tesseract pass (words
 outside or in two regions, an edge through a line, two columns in one region, overlaps, uncovered ink, a lost line); one
-corrective request may follow. Local OCR then recognises each region on its own (rotated by its orientation), and the
+corrective request may follow. Local OCR then recognises each region on its own (rotated by its orientation; it also reads the page whole and an upright region takes over the words only that reading found inside it, as Tesseract reads a region alone worse at page edges and on dark bars), and the
 local block building of `layout.py` runs inside each region, so the Layout and Reading order results keep their shape
 for the later steps. Reading order is left with the links of articles continued across pages, which need the text.
 

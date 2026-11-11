@@ -163,6 +163,39 @@ Decision: why kept or not; reference corrections added.
 Next: what the numbers suggest.
 -->
 
+### 2026-11-11 layout-regions (branch feat/regions-layout, issue #22; kept behind the setting, not the default)
+Hypothesis: AI layout regions decided before OCR (ADR 0006; `layout_method` "regions", layout approved
+automatically) cut the words out of reading order without costing text; steps regions, ocr, layout, order.
+Change: with regions the benchmark base holds only Import and Image preparation and each trial runs Layout,
+Local OCR and Blocks itself. The first trials had about 62 more missing words than the baseline (81-83
+against 20; 77 of them had no box in Local OCR's result), the same ones in all three, all inside a region and with no box at all: the years in the binding's shadow at a region's edge (p6),
+words at the page edges of p1 and p2, the whole imprint (white letters on a black bar, p6). Tesseract reads a
+region alone on its paper canvas worse than on the page, where it leaves a word or an empty word box there.
+So Local OCR now also reads the page whole and a region takes over the words its own reading does not cover
+(`ocr_step.with_page_words`); that brought back all 77 on the stored pages.
+Trials (claude haiku high, corrections 9217c522; correct % / silent / geometry / order / review / unnecessary):
+blocks, 7defbd0: 20261106T065848552834Z 95.12 / 59 / 221 / 12-681w / 292 / 17.
+regions, e5e9c8b: 20261111T181737293664Z 93.82 / 125 / 219 / 24-124w / 261 / 14, 20261111T182005068461Z
+94.59 / 126 / 215 / 24-126w / 219 / 12, 20261111T182010134490Z 94.36 / 125 / 213 / 24-124w / 235 / 10.
+regions with the page words, b2a87ed: 20261111T191400196517Z 94.82 / 61 / 248 / 15-87w / 315 / 19,
+20261111T191530115902Z 94.80 / 64 / 245 / 13-85w / 322 / 19, 20261111T191535142375Z 94.62 / 61 / 251 /
+15-86w / 305 / 14.
+AI time 1770-1842 s as before (Layout +230-270 s, Reading order 207 -> 11 s); Local OCR 51 -> ~200 s.
+Decision: the method stays behind `layout_method`, "blocks" stays the default. Order is far better by words
+and stable, though not by the number of runs (12 -> 13-15; 681 -> ~86 words out of order; p1 274 -> 4, p2 346 -> 41, the 40 on p5 and p2 are left) and silent is
+level, but correct % is 0.3-0.5 points lower in all three trials (haiku's blocks trials since 2026-11-04:
+95.02-95.57) and geometry about 25 higher (211-223 before): p1 extra 7 -> ~20 and box 5 -> ~12, p2 merged
+3 -> ~9 and silent 5 -> ~12, p6 correct 761 -> ~745 with flagged 35 -> ~48. Part of the geometry is the price of the page words: against the
+first regions trials missing fell 82 -> 15 while split rose 16 -> ~62 (the blocks baseline has 59) and extra
+79 -> ~85. No reference corrections. Only
+haiku was run (the issue's scope); luna was not.
+Next: the losses by page before the default changes. p1: marks and noise words in the header region and at
+the left edge that the page reading does not have or that are taken over from it (`with_page_words` takes
+low-confidence words and empty boxes as they are, and a page word with text is not taken where the region
+reading left an empty word box). p2: the lines at y 198-228 of the right column come out
+as illegible markers and two readings overlap there. p6: capital "Š" read as "č" in the region reading
+("člížková", "čeligová"), dots read as commas in the tables. Then a luna trial, and tables inside a region (#23).
+
 ### 2026-11-04 edge-crop-ink (branch optimize/2026-11-04-edge-crop-padding, not kept)
 Hypothesis: at a damaged edge the AI's crop hides the ink the OCR box missed, so luna confirms or guesses a
 line end ("55" -> "54", "sportů." -> "sportů,"; edge guesses 26 luna / 6 haiku silent in the diagnosis);
