@@ -12,7 +12,8 @@ Then words Tesseract merged over a narrow space ("19.2.2000" for "19. 2. 2000") 
 (`inkgaps.split_narrow_spaces`), and the ink gap finder adds empty word boxes for ink inside lines no word covers.
 
 On a page divided into layout regions (ADR 0006, the Layout regions result) each region is read like that on its
-own, turned upright by its orientation (`recognise_regions`); ink outside every region is not read.
+own, turned upright by its orientation (`recognise_regions`); ink outside every region is not read. The page is
+also read whole, and what only that reading found inside an upright region is taken over (`with_page_words`).
 
 The result format is described in `ocrmaker.words`; all geometry is in source page coordinates.
 """
@@ -42,6 +43,10 @@ RECOVERED_CONFIDENCE = 50.0
 RECOVERED_HEIGHT = 0.6
 # The paper level of a region: this percentile of its grey values (most of a region is paper).
 PAPER_PERCENTILE = 90
+# A word of the whole page's reading is one the regions read too when their words cover this share of its box.
+COVERED = 0.5
+# A run of page words joins a region's line when the line spans this share of the run's height.
+SAME_ROW = 0.5
 
 
 def _with_lines(recognised: dict, found: list[list[dict]]) -> dict:
@@ -129,7 +134,63 @@ def recognise_regions(recognizer, page: dict, raster_path, layout_regions: list[
         turned = {"index": page["index"], "raster": {**raster, "width": columns, "height": rows,
                                                     "to_source": to_source, "to_raster": invert(to_source)}}
         lines += [{**line, "region": region["id"]} for line in recognise_page(recognizer, turned, path)["lines"]]
+    lines = with_page_words(lines, recognise_page(recognizer, page, raster_path), layout_regions)
     return {"index": page["index"], "lines": _numbered(page["index"], lines)}
+
+
+def _overlap(a, b) -> float:
+    return max(0.0, min(a[2], b[2]) - max(a[0], b[0])) * max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+
+
+def _around(words: list[dict]) -> list[float]:
+    boxes = [word["bbox"] for word in words]
+    return [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)]
+
+
+def with_page_words(lines: list[dict], whole: dict, layout_regions: list[dict]) -> list[dict]:
+    """The regions' lines with the words and empty word boxes only the whole page's reading (`whole`, a page
+    file) found: a region alone on its canvas must not read less than the page did. A page word is taken over
+    when its centre lies in an upright region (the first in reading order; turned text the page reading cannot
+    read) and the regions' words cover less than COVERED of its box. A run of such words from one page line
+    joins the region's line on whose row it lies, or becomes a line of its own after the region's lines."""
+    read = [word["bbox"] for line in lines for word in line["words"]]
+    by_region = {region["id"]: [line for line in lines if line["region"] == region["id"]]
+                 for region in layout_regions}
+    added = {region["id"]: [] for region in layout_regions}
+
+    def home(box) -> str | None:
+        x, y = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+        region = next((region for region in layout_regions if region["bbox"][0] <= x <= region["bbox"][2]
+                       and region["bbox"][1] <= y <= region["bbox"][3]), None)
+        return region["id"] if region is not None and region_degrees(region) == 0 else None
+
+    for page_line in whole["lines"]:
+        runs: list[tuple[str, list[dict]]] = []
+        for word in page_line["words"]:
+            box = word["bbox"]
+            area = (box[2] - box[0]) * (box[3] - box[1])
+            region = home(box)
+            if region is None or area <= 0 or sum(_overlap(box, other) for other in read) >= COVERED * area:
+                runs.append((None, []))  # a word in between ends the run
+            elif runs and runs[-1][0] == region:
+                runs[-1][1].append(word)
+            else:
+                runs.append((region, [word]))
+        for region, words in runs:
+            if region is None:
+                continue
+            top, bottom = min(w["bbox"][1] for w in words), max(w["bbox"][3] for w in words)
+            rows = [(min(bottom, line["bbox"][3]) - max(top, line["bbox"][1]), position)
+                    for position, line in enumerate(by_region[region])]
+            shared, position = max(rows, default=(0, None))
+            if position is not None and shared >= SAME_ROW * (bottom - top):
+                line = by_region[region][position]
+                joined = sorted(line["words"] + words, key=lambda w: w["bbox"][0])
+                by_region[region][position] = {**line, "words": joined, "bbox": _around(joined)}
+            else:
+                added[region].append({**page_line, "region": region, "words": words, "bbox": _around(words),
+                                      "baseline": None})
+    return [line for region in layout_regions for line in by_region[region["id"]] + added[region["id"]]]
 
 
 def _numbered(index: int, lines: list[dict]) -> list[dict]:

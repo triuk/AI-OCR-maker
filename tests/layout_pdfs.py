@@ -23,6 +23,7 @@ class Print:
     frame: bool = False  # a printed frame around the text, as around an ad
     shade: bool = False  # a halftone grey background under the text, as under a boxed notice
     turn: int = 0  # printed turned by this many degrees counterclockwise: 90 runs bottom to top in `rect`
+    inverse: bool = False  # white letters on a black bar, as a newsletter's imprint
 
     @property
     def words(self) -> list[str]:
@@ -94,13 +95,16 @@ def printed_pdf(path: Path, pages: list[list[Print | Rule | Sketch]], *, size=(4
                 page.draw_rect(rect + (-5, -5, 5, 5), color=(0, 0, 0), width=1.2)
             if item.shade:
                 _halftone(page, rect + (-5, -5, 5, 5))
+            if item.inverse:
+                page.draw_rect(rect + (-6, -6, 6, 6), color=None, fill=(0, 0, 0))
             centre = (rect.tl + rect.br) / 2
             upright = rect if item.turn % 180 == 0 else pymupdf.Rect(
                 centre.x - rect.height / 2, centre.y - rect.width / 2, centre.x + rect.height / 2,
                 centre.y + rect.width / 2)
             overflow = writer.fill_textbox(upright, item.text, font=font, fontsize=item.size)
             assert not overflow, f"{item.key} does not fit its box"
-            writer.write_text(page, morph=(centre, pymupdf.Matrix(item.turn)) if item.turn else None)
+            writer.write_text(page, morph=(centre, pymupdf.Matrix(item.turn)) if item.turn else None,
+                              color=(1, 1, 1) if item.inverse else None)
         image = page.get_pixmap(dpi=dpi, colorspace=pymupdf.csGRAY)
         scanned = output.new_page(width=size[0], height=size[1])
         scanned.insert_image(scanned.rect, stream=image.tobytes("png"), keep_proportion=False)
