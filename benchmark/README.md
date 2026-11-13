@@ -21,14 +21,12 @@ Documents, trial projects and trial records live outside the repository, in `<da
     .venv/bin/python -m ocrmaker.benchmark crops TRIAL --out DIR [--kind …] [--page …]
     .venv/bin/python -m ocrmaker.benchmark rescore TRIAL…
 
-A trial copies the document's base (Import, Image preparation, Local OCR and Layout, kept per code version),
-runs the remaining automatic steps with the configuration, exports without manual corrections and scores
-the export. Changing the local steps' code rebuilds the base on the next trial (a minute or two); changes to
-AI steps or scoring reuse it. Compare trials only when their `corrections` digest is the same (`rescore`).
-
-With layout regions (the default `layout_method` "regions"; `--set layout_method='"blocks"'` runs the old method) the AI decides the layout before OCR, so the base holds
-only Import and Image preparation and every trial runs Layout, Local OCR and Blocks itself, with the layout
-approved as the AI gave it.
+A trial copies the document's base (Import and Image preparation, kept per code version), runs the remaining
+automatic steps with the configuration (the AI decides the layout before OCR, so Layout, Local OCR and Blocks
+run in every trial, the layout approved as the AI gave it), exports without manual corrections and scores the
+export. Changing the local steps' code rebuilds the base on the next trial; changes to the other steps or scoring
+reuse it. Compare trials only when their `corrections` digest is the same (`rescore`; it needs the trial's project,
+so trials whose projects were deleted keep only their recorded scores).
 
 ## Reading the scores
 

@@ -78,7 +78,8 @@ class PrintedOcr(Step):
                     placed.append(word(reading, box, confidence))
                 else:
                     placed.append(word(text, box, 96.0))
-            stored.append({"id": f"p1-l{row + 1}", "bbox": [placed[0]["bbox"][0], placed[0]["bbox"][1],
+            # The words of the one layout region the default scripted AI gives the page.
+            stored.append({"id": f"p1-l{row + 1}", "region": "p1-r1", "bbox": [placed[0]["bbox"][0], placed[0]["bbox"][1],
                                                             placed[-1]["bbox"][2], placed[-1]["bbox"][3]],
                            "baseline": None, "block": 0, "paragraph": 0, "words": placed})
         ctx.output.write_json(page_file(0), {"index": 0, "lines": stored})

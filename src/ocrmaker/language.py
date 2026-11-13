@@ -70,7 +70,7 @@ class Request:
     instructions: the task, shared by every request of one kind (cached by the CLI where it can);
     data: the JSON-serialisable batch data of this request; schema: JSON Schema of a JSON answer, or None
     for plain text; images: files attached to the request; web_search: allow the provider's web search;
-    purpose: what the request is for (diagnostics and scripted answers), e.g. "reading_order".
+    purpose: what the request is for (diagnostics and scripted answers), e.g. "continuations".
     """
     instructions: str
     data: object = None

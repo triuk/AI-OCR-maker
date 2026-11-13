@@ -6,9 +6,13 @@ import re
 import pymupdf
 import pytest
 
-from fakes import ScriptedProvider, answer_spots, run_and_export
+from fakes import default_provider, run_and_export
 from layout_pdfs import LEFT, RIGHT, Print, printed_pdf
 from pdfs import czech_font_buffer
+from test_region_ocr import continued, regions_in_turn
+from test_regions import part
+from ocrmaker import regions
+from ocrmaker.reading_order import CONTINUATION_PURPOSE
 from ocrmaker.steps import implementations
 from ocrmaker.steps.export_step import ExportStep
 from ocrmaker.store import ProjectStore
@@ -96,37 +100,25 @@ PAGES = [
 ]
 
 
-def article(*numbers, kind="article", continues=None) -> dict:
-    return {"kind": kind, "blocks": list(numbers), "continues": continues}
+def box(page, *keys, pad=4) -> list[int]:
+    """The grid box (0..1000) around the printed items of a PAGES page."""
+    rects = [item.rect for item in PAGES[page] if item.key in keys]
+    x0, y0 = min(r[0] for r in rects) - pad, min(r[1] for r in rects) - pad
+    x1, y1 = max(r[2] for r in rects) + pad, max(r[3] for r in rects) + pad
+    return [round(x0 * 1000 / 420), round(y0 * 1000 / 595), round(x1 * 1000 / 420), round(y1 * 1000 / 595)]
 
 
-def numbers_by_key(request, items) -> dict[str, int]:
-    """The block number of every printed item, found by the item's first word at the start of a block."""
-    found = {}
-    for item in items:
-        matches = [block["number"] for block in request.data["blocks"]
-                   if block["starts"].split()[:1] == item.words[:1]]
-        assert len(matches) == 1, f"no single block starts with {item.words[0]!r}: {request.data['blocks']}"
-        found[item.key] = matches[0]
-    return found
-
-
-def reading_order(request):
-    """The scripted AI: page 1 has two articles (one with a caption) and an ad, page 2 continues the second."""
-    page = request.data["page"]
-    number = numbers_by_key(request, PAGES[page - 1])
-    if page == 1:
-        return {"articles": [article(number["header-1"], kind="header"),
-                             article(number["C-head"], number["C1"], number["caption-1"]),
-                             article(number["E-head"], number["E1"]),
-                             article(number["ad-1"], kind="ad"),
-                             article(number["footer-1"], kind="footer")]}
-    [continued] = [item["id"] for item in request.data["previous_page"]["articles"]
-                   if item["ends"].endswith("oplocení")]
-    return {"articles": [article(number["header-2"], kind="header"),
-                         article(number["E2"], continues=continued),
-                         article(number["F-head"], number["F1"]),
-                         article(number["footer-2"], kind="footer")]}
+# The scripted layout: page 1 has two articles (one with a caption) and an ad, page 2 continues the second.
+PAGES_REGIONS = [
+    {"parts": [part("Rychvaldský zpravodaj", box(0, "header-1"), kind="header"),
+               part("Hasiči slavili", box(0, "C-head", "C1"), box(0, "caption-1")),
+               part("Nový hřbitov", box(0, "E-head", "E1")),
+               part("Prodám garáž", box(0, "ad-1"), kind="ad"),
+               part("strana 5", box(0, "footer-1"), kind="footer")]},
+    {"parts": [part("Rychvaldský zpravodaj", box(1, "header-2"), kind="header"),
+               part("začnou ještě letos", box(1, "E2")),
+               part("Turnaj v kopané", box(1, "F-head", "F1")),
+               part("strana 6", box(1, "footer-2"), kind="footer")]}]
 
 
 def markdown(workflow, project) -> str:
@@ -138,7 +130,8 @@ def markdown(workflow, project) -> str:
 @pytest.fixture(scope="module")
 def exported(tmp_path_factory):
     directory = tmp_path_factory.mktemp("article-text")
-    provider = ScriptedProvider().on("reading_order", reading_order).on("readthrough", {"words": []})
+    provider = default_provider().on(regions.PURPOSE, regions_in_turn(PAGES_REGIONS))
+    provider.on(CONTINUATION_PURPOSE, continued)
     workflow = Workflow(ProjectStore(directory / "library"), language=provider)
     project = run_and_export(workflow, workflow.create(printed_pdf(directory / "zpravodaj-2000-05.pdf", PAGES))["id"])
     return workflow, project, markdown(workflow, project)
@@ -238,8 +231,7 @@ UNCLEAR = [
 
 
 def test_unclear_hyphens_are_decided_by_the_dictionary_and_the_documents_own_words(tmp_path):
-    provider = ScriptedProvider().on("reading_order", lambda request: {"articles": [
-        article(*(block["number"] for block in request.data["blocks"]))]}).on("readthrough", {"words": []})
+    provider = default_provider()
     steps = implementations() | {"export": DictionaryExport(["sever", "jih", "zasedání"])}
     workflow = Workflow(ProjectStore(tmp_path / "library"), steps=steps, language=provider)
     project = run_and_export(
@@ -289,8 +281,7 @@ PLACES = [
 
 
 def test_short_lines_one_under_another_stay_paragraphs_of_their_own(tmp_path):
-    provider = ScriptedProvider().on("reading_order", lambda request: {"articles": [
-        article(*(block["number"] for block in request.data["blocks"]))]}).on("readthrough", {"words": []})
+    provider = default_provider()
     workflow = Workflow(ProjectStore(tmp_path / "library"), language=provider)
     project = run_and_export(
         workflow, workflow.create(printed_pdf(tmp_path / "zpravodaj-2000-05.pdf", [PLACES]))["id"])
@@ -313,9 +304,7 @@ TIMES = [
 
 
 def test_rows_opening_with_a_key_stay_paragraphs_of_their_own(tmp_path):
-    provider = ScriptedProvider().on("reading_order", lambda request: {"articles": [
-        article(*(block["number"] for block in request.data["blocks"]))]}).on("readthrough", {"words": []}) \
-        .on("reconstruction", answer_spots()).on("lookup", {"lookups": []})
+    provider = default_provider()
     workflow = Workflow(ProjectStore(tmp_path / "library"), language=provider)
     project = run_and_export(
         workflow, workflow.create(printed_pdf(tmp_path / "zpravodaj-2000-05.pdf", [TIMES]))["id"])

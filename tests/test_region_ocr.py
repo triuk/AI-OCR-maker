@@ -1,7 +1,6 @@
 """Seam 1 with real Tesseract: Local OCR, Layout (blocks) and Reading order per layout region (ADR 0006, #18)."""
 from __future__ import annotations
 
-import pymupdf
 import pytest
 
 from fakes import ScriptedProvider, answer_spots, run_and_export
@@ -25,7 +24,6 @@ def run_local(tmp_path, pdf, *answers, steps=LOCAL):
     workflow = Workflow(ProjectStore(tmp_path / "library"), language=provider,
                         steps={step: shipped[step] for step in steps})
     project = workflow.create(pdf)
-    workflow.update_settings(project["id"], {"layout_method": "regions", "layout_auto_approve": True})
     return workflow, workflow.run(project["id"])
 
 
@@ -154,13 +152,10 @@ def test_blocks_are_built_inside_each_region_in_the_regions_order(tmp_path, cros
 def test_export_writes_the_articles_in_the_regions_reading_order(tmp_path, crossing_pdf):
     provider = ScriptedProvider().on(regions.PURPOSE, READING).on("readthrough", {"words": []})
     workflow = Workflow(ProjectStore(tmp_path / "library"), language=provider)
-    project = workflow.create(crossing_pdf)
-    workflow.update_settings(project["id"], {"layout_method": "regions", "layout_auto_approve": True})
-    project = run_and_export(workflow, project["id"])
+    project = run_and_export(workflow, workflow.create(crossing_pdf)["id"])
 
     assert {step["id"]: step["state"] for step in project["steps"]}["export"] == "done"
-    # the articles, their kinds and their order come from the regions; nothing asks the AI to regroup the blocks
-    assert provider.requests_for("reading_order") == []
+    # the articles, their kinds and their order come from the regions
     layout = workflow.result(project["id"], "layout").read_json(page_file(0))
     order = workflow.result(project["id"], "order").read_json("order.json")
     [entry] = order["pages"]
@@ -260,7 +255,6 @@ def continuation(tmp_path_factory):
     provider.on(rules.CONTINUATION_PURPOSE, continued)
     workflow = Workflow(ProjectStore(directory / "library"), language=provider)
     project = workflow.create(printed_pdf(directory / "zpravodaj-2000-05.pdf", RULES))
-    workflow.update_settings(project["id"], {"layout_method": "regions", "layout_auto_approve": True})
     return workflow, provider, run_and_export(workflow, project["id"])
 
 

@@ -31,32 +31,15 @@ def test_trials_share_the_local_steps_and_are_scored_against_the_reference(tmp_p
     words = len(f"{SAMPLE_TEXT} (1)".split())
     assert first["totals"]["reference_words"] == words
     assert first["totals"]["correct"] == words  # a clean synthetic print reads perfectly
-    # Import, image preparation, local OCR and layout ran once, for the first trial only.
+    # Import and image preparation ran once, for the first trial only; the layout regions come from the AI, so
+    # they belong to the configuration and not to the shared base.
     assert first["base"] == second["base"]
     ran = {step["id"] for step in second["steps"] if not step["shared"]}
-    assert ran == {"order", "problems", "reconstruct", "lookup", "review", "export"}
-    assert second["ai"]["requests"] >= 1
-    assert [trial["id"] for trial in benchmark.trials()] == [first["id"], second["id"]]
-
-
-def test_with_layout_regions_the_trial_itself_runs_layout_and_ocr(tmp_path, language_provider):
-    # The layout regions come from the AI, so they belong to the configuration and not to the shared base.
-    benchmark = Benchmark(tmp_path / "benchmark", language=language_provider)
-    benchmark.add_document("sample", *sample_document(tmp_path))
-    whole_page = {"parts": [{"kind": "article", "title": "", "regions": [
-        {"box": [20, 20, 980, 980], "orientation": "0"}]}]}
-    language_provider.on("layout_regions", whole_page)
-
-    first, = benchmark.run({"ai_provider": "claude", "ai_model": "haiku", "layout_method": "regions"})
-    second, = benchmark.run({"ai_provider": "claude", "ai_model": "sonnet", "layout_method": "regions"})
-
-    assert first["failed"] is None and second["failed"] is None
+    assert ran == {"regions", "ocr", "layout", "order", "problems", "reconstruct", "lookup", "review", "export"}
     # No person approves a trial's layout: it measures the automatic result.
     assert first["settings"]["layout_auto_approve"] is True
-    assert first["base"] == second["base"]
-    assert {step["id"] for step in second["steps"] if step["shared"]} == {"import", "prepare"}
-    assert len(language_provider.requests_for("layout_regions")) == 2
-    assert first["totals"]["correct"] == len(f"{SAMPLE_TEXT} (1)".split())
+    assert second["ai"]["requests"] >= 1
+    assert [trial["id"] for trial in benchmark.trials()] == [first["id"], second["id"]]
 
 
 def test_a_trial_records_the_commit_it_started_on(tmp_path, language_provider, monkeypatch):
@@ -80,12 +63,12 @@ def test_a_trial_records_the_commit_it_started_on(tmp_path, language_provider, m
 def test_a_trial_whose_run_failed_is_recorded_as_failed_with_nothing_exported(tmp_path, language_provider):
     benchmark = Benchmark(tmp_path / "benchmark", language=language_provider)
     benchmark.add_document("sample", *sample_document(tmp_path))
-    language_provider.on("reading_order", LanguageError("Limit předplatného je vyčerpaný.", code=USAGE_LIMIT))
+    language_provider.on("layout_regions", LanguageError("Limit předplatného je vyčerpaný.", code=USAGE_LIMIT))
     trial, = benchmark.run({"ai_provider": "claude"})
-    assert trial["failed"] == {"step": "order", "message": "Limit předplatného je vyčerpaný."}
+    assert trial["failed"] == {"step": "regions", "message": "Limit předplatného je vyčerpaný."}
     assert trial["review"] is None and trial["totals"]["correct"] == 0
     row = summary(trial)
-    assert row["failed"] == "order"
+    assert row["failed"] == "regions"
     # Text missing from the result is a silent error (GLOSSARY), so the silent column counts it.
     assert row["silent"] == trial["totals"]["reference_words"]
 

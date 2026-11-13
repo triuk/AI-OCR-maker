@@ -213,13 +213,16 @@ def answer_spots(readings: dict | None = None, *, extra: list[dict] = ()):
     return answer
 
 
+# A layout answer of one article over the whole page (the regions step's own fallback, without its warning).
+WHOLE_PAGE = {"parts": [{"kind": "article", "title": "", "regions": [{"box": [0, 0, 1000, 1000], "orientation": "0"}]}]}
+
+
 def default_provider() -> ScriptedProvider:
-    """The scripted AI of the language_provider fixture: Reading order as Layout's numbering in one article,
-    the read-through naming no word, AI reconstruction confirming every problem spot's own reading (empty word boxes stay unanswered), and Web
-    lookup settling nothing."""
-    return ScriptedProvider().on("reading_order", lambda request: {"articles": [
-        {"kind": "article", "blocks": [block["number"] for block in request.data["blocks"]], "continues": None}]}
-    ).on("readthrough", {"words": []}).on("reconstruction", answer_spots()).on("lookup", {"lookups": []})
+    """The scripted AI of the language_provider fixture: Layout as one region over the whole page, Reading order
+    linking no article across pages, the read-through naming no word, AI reconstruction confirming every problem
+    spot's own reading (empty word boxes stay unanswered), and Web lookup settling nothing."""
+    return (ScriptedProvider().on("layout_regions", WHOLE_PAGE).on("continuations", {"links": []})
+            .on("readthrough", {"words": []}).on("reconstruction", answer_spots()).on("lookup", {"lookups": []}))
 
 
 def run_and_export(workflow, project_id: str) -> dict:

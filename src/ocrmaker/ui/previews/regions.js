@@ -2,8 +2,8 @@
 // Layout (regions) step: the layout editor, the manual half of Layout (ADR 0006, issue #20). All pages lie under
 // each other in one scroller; the person moves, resizes, draws, orders, locks and notes layout regions, every edit is
 // saved to the server at once (the server is the only store) and "Zpracovat" sends the unlocked pages to the AI
-// again, "Schválit" approves the layout and the run goes on. It is a port of the throwaway prototype in
-// benchmark/prototypes/regions/editor/ (not in git); the interaction code is kept as it was approved.
+// again, "Schválit" approves the layout and the run goes on. It is a port of a throwaway prototype; the
+// interaction code is kept as it was approved.
 //
 // Geometry: boxes are [x0, y0, x1, y1] in the 0..1000 grid (a fraction of the whole page on both axes), so the page
 // image maps to them directly. A page is one row of regions in reading order; consecutive regions with the same
@@ -11,11 +11,11 @@
 // `parts[part]`. The server's page layout is a list of parts ({kind, title, continues, regions: [...]}); the two
 // conversions are `fromServer` and `toServer`.
 //
-// A project without layout regions (the blocks method) keeps the read-only overlay preview (`legacy` below).
+// While the server has no layout yet (Layout not run), the read-only overlay preview (`overlayPreview` below) shows.
 (function () {
   const {pageViewer, svg, box, api, apiUrl, esc, plural, toast} = window.ocrmaker;
 
-  // ------------------------------------------------------------------ read-only overlay (blocks method)
+  // ------------------------------------------------------------------ read-only overlay (no layout yet)
   const KINDS = [["article", "článek"], ["header", "záhlaví"], ["footer", "zápatí"], ["ad", "inzerát"]];
   const LABELS = Object.fromEntries(KINDS);
   const CLASSES = {article: "layout-body", header: "layout-header", footer: "layout-footer", ad: "layout-ad"};
@@ -44,7 +44,7 @@
   const regionLabel = region => `${region.article}${COLUMNS[region.column - 1] || region.column}`;
 
   function describe(overlay, page) {
-    if (!overlay) return `Strana ${page.index + 1}: bez oblastí (metoda bloků)`;
+    if (!overlay) return `Strana ${page.index + 1}: bez oblastí`;
     const articles = new Set(overlay.regions.map(region => region.article)).size;
     const source = overlay.source === "failed" ? " · bez použitelné odpovědi AI: celá strana je jedna oblast" : "";
     const issues = overlay.problems.length ? ` · problémů kontroly ${overlay.problems.length}` : "";
@@ -63,7 +63,7 @@
     for (const spot of overlay.spots) box(spot, {class: "regions-spot", "data-tip": "Inkoust mimo oblasti"}, layer);
   }
 
-  const legacy = (container, project, step) => pageViewer(container, project, step, {
+  const overlayPreview = (container, project, step) => pageViewer(container, project, step, {
     draw, describe,
     legend: KINDS.map(([kind, text]) => ({label: text, cls: CLASSES[kind]}))
       .concat([{label: "inkoust mimo oblasti", cls: "regions-spot"}]),
@@ -1217,8 +1217,8 @@
     try {
       if (await mount(container, project)) return;
     } catch (e) {
-      if (e.status !== 422) throw e;   // no layout regions (the blocks method, or Layout not run): the overlay below
+      if (e.status !== 422) throw e;   // no layout regions yet (Layout not run): the overlay below
     }
-    await legacy(container, project, step);
+    await overlayPreview(container, project, step);
   };
 })();
