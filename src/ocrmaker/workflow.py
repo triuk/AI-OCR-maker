@@ -246,9 +246,9 @@ class Workflow:
         result = self.result(project_id, PAGES_STEP)
         return read_pages(result) if result else []
 
-    def page_image(self, project_id: str, page: int) -> Path:
-        """The source-view working raster of one page (0-based index), a PNG; KeyError when there is none."""
-        pages = self.pages(project_id)
+    def page_image(self, project_id: str, page: int, *, prepared: bool = False) -> Path:
+        """One page's PNG (0-based index), from Import or preparation; KeyError when unavailable."""
+        pages = self._prepared_pages(project_id) if prepared else self.pages(project_id)
         if not 0 <= page < len(pages):
             raise KeyError("Obraz stránky zatím není k dispozici.")
         raster = pages[page]["raster"]

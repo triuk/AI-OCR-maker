@@ -144,7 +144,15 @@ class ProjectStore:
     def get(self, project_id: str) -> dict:
         path = self.directory(project_id) / PROJECT_FILE
         try:
-            return read_json(path)
+            project = read_json(path)
+            # Older projects predate Layout regions and already use the blocks pipeline.
+            if "regions" not in project["steps"]:
+                project["steps"]["regions"] = {
+                    "state": "done", "message": None, "started": None, "finished": None,
+                    "duration": None, "run_id": None, "progress": None, "action": None,
+                }
+                project.setdefault("settings", {}).setdefault("layout_method", "blocks")
+            return project
         except FileNotFoundError:
             raise KeyError("Projekt neexistuje.") from None
 
