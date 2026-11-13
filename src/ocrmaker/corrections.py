@@ -28,10 +28,6 @@ manual review shows it over the scan and the report lists it.
      "bbox": [x0, y0, x1, y1],    # the region, source page coordinates (ocrmaker.pages), inside the page
      "text": "Ověřit jméno."      # the note, never empty
 
-Older versions also stored kind "order", a manual article order of a page. The reading order is now decided
-in Layout only (ADR 0006), so the store drops such corrections when it reads the list
-(`ocrmaker.store.RETIRED_CORRECTIONS`): they change nothing, count as nothing and leave the file at its next save.
-
 Every correction counts as one, whatever its kind; `apply` ignores kinds it does not write.
 
 Bookkeeping on the stored list (each changes it in place; the caller saves it under the run lock):
