@@ -27,8 +27,9 @@ DEFAULTS = {
     # Web lookup: short web searches settle the spots AI reconstruction left unresolved (off: they stay unresolved).
     "web_lookup": True,
     # Layout method (ADR 0006): "regions" divides each page into AI layout regions before OCR; "blocks" is the
-    # method of ADR 0005 (blocks from Tesseract's lines, grouped by Reading order). "blocks" until benchmarked.
-    "layout_method": "blocks",
+    # method of ADR 0005 (blocks from Tesseract's lines, grouped by Reading order). "regions" is the default: the
+    # benchmark (benchmark/JOURNAL.md, 2026-11-11) showed far fewer reading order errors for a slightly lower text accuracy.
+    "layout_method": "regions",
     # With layout regions a run stops at Layout until the person approves the layout; on, the AI's layout is
     # approved at once (batch work, the benchmark).
     "layout_auto_approve": False,

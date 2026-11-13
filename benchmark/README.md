@@ -26,7 +26,7 @@ runs the remaining automatic steps with the configuration, exports without manua
 the export. Changing the local steps' code rebuilds the base on the next trial (a minute or two); changes to
 AI steps or scoring reuse it. Compare trials only when their `corrections` digest is the same (`rescore`).
 
-With layout regions (`--set layout_method='"regions"'`) the AI decides the layout before OCR, so the base holds
+With layout regions (the default `layout_method` "regions"; `--set layout_method='"blocks"'` runs the old method) the AI decides the layout before OCR, so the base holds
 only Import and Image preparation and every trial runs Layout, Local OCR and Blocks itself, with the layout
 approved as the AI gave it.
 

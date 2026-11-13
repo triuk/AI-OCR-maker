@@ -11,10 +11,22 @@ sys.path.insert(0, str(Path(__file__).parent))
 from fakes import default_provider  # noqa: E402
 from pdfs import scan_pdf  # noqa: E402
 
+from ocrmaker import settings  # noqa: E402
 from ocrmaker.store import ProjectStore  # noqa: E402
 from ocrmaker.workflow import Workflow  # noqa: E402
 
 TOKEN = "test-token"
+
+
+# The suite runs the method of ADR 0005 unless a test switches layout regions on, module-scoped fixtures included.
+REAL_LAYOUT_METHOD = settings.DEFAULTS["layout_method"]
+settings.DEFAULTS["layout_method"] = "blocks"
+
+
+@pytest.fixture
+def real_layout_method() -> str:
+    """The application's own default layout method, which the rest of the suite overrides."""
+    return REAL_LAYOUT_METHOD
 
 
 @pytest.fixture

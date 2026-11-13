@@ -29,7 +29,7 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents
   is written by `src/ocrmaker/textlayer.py` from a per-page plan of lines of words, which the Export step builds.
 - Layout regions (ADR 0006; step `regions`, label Rozvržení, before Local OCR) are defined in `src/ocrmaker/regions.py`
   (method v8 of `benchmark/prototypes/regions/`) and run by `src/ocrmaker/steps/regions_step.py`; the setting
-  `layout_method` ("blocks" default, "regions") switches them on. Seam 1 tests: `tests/test_regions.py`.
+  `layout_method` ("regions" default, "blocks" the method of ADR 0005) switches between them. Seam 1 tests: `tests/test_regions.py`.
   With regions, Local OCR reads each region on its own (`ocr_step.recognise_regions`, lines name their region;
   words only the whole page's reading found are taken over, `with_page_words`),
   Bloky builds blocks inside each region (`layout.build_regions`) and Reading order takes the articles from the

@@ -163,7 +163,7 @@ Decision: why kept or not; reference corrections added.
 Next: what the numbers suggest.
 -->
 
-### 2026-11-11 layout-regions (branch feat/regions-layout, issue #22; kept behind the setting, not the default)
+### 2026-11-11 layout-regions (branch feat/regions-layout, issue #22; "regions" became the default on 2026-11-13)
 Hypothesis: AI layout regions decided before OCR (ADR 0006; `layout_method` "regions", layout approved
 automatically) cut the words out of reading order without costing text; steps regions, ocr, layout, order.
 Change: with regions the benchmark base holds only Import and Image preparation and each trial runs Layout,
@@ -181,7 +181,9 @@ regions with the page words, b2a87ed: 20261111T191400196517Z 94.82 / 61 / 248 / 
 20261111T191530115902Z 94.80 / 64 / 245 / 13-85w / 322 / 19, 20261111T191535142375Z 94.62 / 61 / 251 /
 15-86w / 305 / 14.
 AI time 1770-1842 s as before (Layout +230-270 s, Reading order 207 -> 11 s); Local OCR 51 -> ~200 s.
-Decision: the method stays behind `layout_method`, "blocks" stays the default. Order is far better by words
+Decision: first kept behind `layout_method` with "blocks" as the default; on 2026-11-13 the user decided that reading
+order matters more than the 0.3-0.5 points of text accuracy, so "regions" is the default and "blocks" stays
+selectable (the comparison baseline). Order is far better by words
 and stable, though not by the number of runs (12 -> 13-15; 681 -> ~86 words out of order; p1 274 -> 4, p2 346 -> 41, the 40 on p5 and p2 are left) and silent is
 level, but correct % is 0.3-0.5 points lower in all three trials (haiku's blocks trials since 2026-11-04:
 95.02-95.57) and geometry about 25 higher (211-223 before): p1 extra 7 -> ~20 and box 5 -> ~12, p2 merged
@@ -189,7 +191,7 @@ level, but correct % is 0.3-0.5 points lower in all three trials (haiku's blocks
 first regions trials missing fell 82 -> 15 while split rose 16 -> ~62 (the blocks baseline has 59) and extra
 79 -> ~85. No reference corrections. Only
 haiku was run (the issue's scope); luna was not.
-Next: the losses by page before the default changes. p1: marks and noise words in the header region and at
+Next: the losses by page. p1: marks and noise words in the header region and at
 the left edge that the page reading does not have or that are taken over from it (`with_page_words` takes
 low-confidence words and empty boxes as they are, and a page word with text is not taken where the region
 reading left an empty word box). p2: the lines at y 198-228 of the right column come out

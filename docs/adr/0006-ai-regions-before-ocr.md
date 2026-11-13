@@ -25,5 +25,6 @@ and the user's costly fixes are adding a region and renumbering, not resizing on
 each later piece of work (OCR, order inside a region, AI requests) to one smaller logical unit. In the prototype
 benchmark (31 pages, three runs) v8 left 0–3 pages needing a costly fix with Claude haiku (high effort, the default)
 against 11–15 for the old method. Uncovered text is never rescued automatically: it is shown in review instead, so
-nothing is silently assigned to the wrong article. The old method stays selectable by a setting until the program's
-benchmark (three trials) shows the new one is not worse.
+nothing is silently assigned to the wrong article. The old method stays selectable by the setting `layout_method`. The program's benchmark (benchmark/JOURNAL.md,
+2026-11-11) found the new method far better in reading order and 0.3–0.5 points lower in text accuracy; the user
+chose reading order, so "regions" is the default since 2026-11-13.
