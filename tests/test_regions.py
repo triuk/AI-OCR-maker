@@ -171,3 +171,34 @@ def test_the_blocks_method_asks_nothing(tmp_path, pdf):
 
 def states(project) -> dict:
     return {step["id"]: step["state"] for step in project["steps"]}
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_preview_grid_maps_through_the_rotated_raster(rotation):
+    from ocrmaker import layout_review
+    from ocrmaker.pages import apply_rect, display_matrix, display_size, invert
+
+    geometry = {"width": 420, "height": 595, "rotation": rotation}
+    width, height = display_size(geometry)
+    matrix = display_matrix(geometry)
+    geometry["raster"] = {"width": width, "height": height,
+                           "to_raster": matrix, "to_source": invert(matrix)}
+    page = regions.Page.__new__(regions.Page)
+    page.rect = pymupdf.Rect(0, 0, 420, 595)
+    page.raster = geometry["raster"]
+    source_box = [42, 119, 168, 357]
+    displayed = apply_rect(matrix, source_box)
+    expected = [round(v * 1000 / size, 4) for v, size in zip(displayed, (width, height) * 2)]
+
+    assert regions.grid_box(source_box, 420, 595, page.raster) == expected
+    assert page.to_page(expected) == pytest.approx(source_box)
+    region = {"article": 1, "kind": "article", "orientation": "0", "bbox": source_box}
+    entry = {"index": 0, "regions": [region], "source": "ai", "spots": [source_box]}
+    view = layout_review.page_view(entry, None, geometry)
+    assert view["parts"][0]["regions"][0]["box"] == expected
+    assert view["spots"] == [expected]
+    assert (view["raster_width"], view["raster_height"]) == (width, height)
+    answer = {"parts": [{"kind": "article", "regions": [{"keep": "1"}]}]}
+    resolved, broken = regions.resolve(page, answer, view["parts"])
+    assert broken == []
+    assert resolved["parts"][0]["regions"][0]["fixed"] == pytest.approx(source_box)

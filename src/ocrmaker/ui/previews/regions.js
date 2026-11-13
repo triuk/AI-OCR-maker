@@ -639,7 +639,7 @@
       const w = baseWidth() * zoom;
       for (const [i, g] of info.entries()) {
         const p = srv.pages[i];
-        g.W = w; g.H = w * p.height / p.width;
+        g.W = w; g.H = w * p.raster_height / p.raster_width;
         g.canvas.style.width = `${g.W}px`; g.canvas.style.height = `${g.H}px`;
       }
       button("zfit").textContent = `${Math.round(zoom * 100)} %`;
@@ -825,7 +825,7 @@
         const el = document.createElement("section");
         el.className = "le-pg";
         el.innerHTML = `<div class="le-pg-head"><b>Strana ${p.index + 1}</b><span class="pill status"></span><span class="pill warn" hidden></span><span class="pill unl" hidden></span><span class="pill notepill" hidden>✎ poznámka</span>${p.round > 1 ? `<span class="pill">kolo ${p.round}</span>` : ""}<span class="sp"></span><button type="button" class="reset" hidden title="Vrátit návrh AI pro tuto stranu">↺ návrh AI</button></div>
-          <div class="le-canvas" data-i="${i}"><img src="${esc(apiUrl(`/projects/${project.id}/pages/${p.index}/image`))}" alt="Strana ${p.index + 1}" draggable="false" decoding="async"><svg xmlns="${NS}"></svg></div>
+          <div class="le-canvas" data-i="${i}"><img src="${esc(apiUrl(`/projects/${project.id}/pages/${p.index}/image?prepared=true`))}" alt="Strana ${p.index + 1}" draggable="false" decoding="async"><svg xmlns="${NS}"></svg></div>
           <textarea class="le-note" rows="1" placeholder="Poznámka ke straně pro AI…" spellcheck="false"></textarea>
           <div class="le-extra"></div>`;
         pagesEl.appendChild(el);

@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import math
 
-from .regions import KINDS, ORIENTATIONS, SCALE, layout_parts
+from .regions import KINDS, ORIENTATIONS, SCALE, grid_box, layout_parts
 
 WAITING, APPROVED = "waiting", "approved"
 # A region narrower or lower than this (grid units) is a slip of the mouse, not a region.
@@ -51,12 +51,12 @@ def current(edits: dict, entry: dict) -> dict | None:
 
 def proposal(entry: dict, page: dict) -> list[dict]:
     """The AI's layout of the page in its round, as parts with every region locked."""
-    return layout_parts(entry.get("proposal", entry["regions"]), page["width"], page["height"])
+    return layout_parts(entry.get("proposal", entry["regions"]), page["width"], page["height"], page.get("raster"))
 
 
 def laid_out(entry: dict, page: dict) -> list[dict]:
     """The page's layout in the result, as parts with every region locked."""
-    return layout_parts(entry["regions"], page["width"], page["height"])
+    return layout_parts(entry["regions"], page["width"], page["height"], page.get("raster"))
 
 
 def effective(entry: dict, edit: dict | None, page: dict) -> list[dict]:
@@ -159,8 +159,10 @@ def page_view(entry: dict, edit: dict | None, page: dict) -> dict:
     """One page in the layout editor (see Workflow.layout)."""
     parts, suggested = effective(entry, edit, page), proposal(entry, page)
     return {"index": entry["index"], "width": page["width"], "height": page["height"],
+            "raster_width": page.get("raster", {}).get("width", page["width"]),
+            "raster_height": page.get("raster", {}).get("height", page["height"]),
             "round": page_round(entry), "source": entry["source"], "reason": entry.get("reason"),
             "parts": parts, "proposal": suggested, "edited": shape(parts) != shape(suggested),
             "note": edit["note"] if edit else "", "sent_note": entry.get("note"), "process": wanted(edit),
-            "spots": [[round(v * SCALE / size, 2) for v, size in zip(spot, (page["width"], page["height"]) * 2)]
+            "spots": [grid_box(spot, page["width"], page["height"], page.get("raster"))
                       for spot in entry["spots"]]}

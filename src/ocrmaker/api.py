@@ -148,8 +148,8 @@ def create_api(workflow: Workflow, *, token: str | None = None, control=None) ->
         return {"pages": workflow.pages(project_id)}
 
     @app.get("/api/projects/{project_id}/pages/{page}/image")
-    def page_image(project_id: str, page: int):
-        return FileResponse(workflow.page_image(project_id, page), media_type="image/png")
+    def page_image(project_id: str, page: int, prepared: bool = False):
+        return FileResponse(workflow.page_image(project_id, page, prepared=prepared), media_type="image/png")
 
     @app.get("/api/projects/{project_id}/layout")
     def layout(project_id: str):

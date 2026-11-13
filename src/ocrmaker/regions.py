@@ -22,8 +22,8 @@ orientation, its part's kind, title and continuation), never snapped and never d
 part (`resolve`). An answer that breaks a lock gets the corrective request too; one that still breaks it is refused.
 Approval (`drawn_page`) takes the person's layout as drawn: every region fixed, only checked.
 
-Geometry: boxes are kept in grid units of the page (0..1000 along each side of the source page extent) and in
-source page coordinates (`pt`). Pages with a /Rotate other than 0 are not handled specially yet.
+Geometry: boxes are kept in grid units of the page (0..1000 along each side of the working raster extent) and in
+source page coordinates (`pt`).
 
 The Layout regions result (`steps/regions/`, see `ocrmaker.steps.regions_step`) holds per page
     {"index": 0, "method": "regions", "source": "ai" | "failed" | "manual", "reason": str | None,
@@ -532,6 +532,7 @@ class Page:
     page: the prepared page (`ocrmaker.pages`); recognised: a whole-page Tesseract result (`ocrmaker.words`)."""
 
     def __init__(self, page: dict, recognised: dict, raster_path: Path):
+        self.raster = page["raster"]
         self.n = page["index"] + 1
         self.rect = pymupdf.Rect(0, 0, page["width"], page["height"])
         self.words = []
@@ -562,14 +563,10 @@ class Page:
             w["text_word"] = not w["noise"] and not w["decor"]
 
     def to_page(self, box):
-        r = self.rect
-        return (r.x0 + box[0] * r.width / SCALE, r.y0 + box[1] * r.height / SCALE,
-                r.x0 + box[2] * r.width / SCALE, r.y0 + box[3] * r.height / SCALE)
+        return page_box(box, self.rect.width, self.rect.height, self.raster)
 
     def to_grid(self, box, outward=False):
-        r = self.rect
-        values = [(box[0] - r.x0) * SCALE / r.width, (box[1] - r.y0) * SCALE / r.height,
-                  (box[2] - r.x0) * SCALE / r.width, (box[3] - r.y0) * SCALE / r.height]
+        values = grid_box(box, self.rect.width, self.rect.height, self.raster)
         if outward:
             return [int(numpy.floor(values[0])), int(numpy.floor(values[1])),
                     int(numpy.ceil(values[2])), int(numpy.ceil(values[3]))]
@@ -1195,17 +1192,23 @@ def layout_page(page: Page, ask, image: Path) -> dict:
 
 # ---------------------------------------------------------------- later rounds: the person's layout
 
-def grid_box(bbox, width: float, height: float) -> list[float]:
+def grid_box(bbox, width: float, height: float, raster: dict | None = None) -> list[float]:
     """A page box (source page coordinates) in grid units, precise enough to give the same page box back."""
+    if raster is not None:
+        bbox = apply_rect(raster["to_raster"], bbox)
+        width, height = raster["width"], raster["height"]
     return [round(v * SCALE / size, 4) for v, size in zip(bbox, (width, height) * 2)]
 
 
-def page_box(box, width: float, height: float) -> list[float]:
+def page_box(box, width: float, height: float, raster: dict | None = None) -> list[float]:
     """A grid box in source page coordinates, rounded as the result keeps them."""
+    if raster is not None:
+        pixels = [v * size / SCALE for v, size in zip(box, (raster["width"], raster["height"]) * 2)]
+        return [round(v, 2) for v in apply_rect(raster["to_source"], pixels)]
     return [round(v * size / SCALE, 2) for v, size in zip(box, (width, height) * 2)]
 
 
-def layout_parts(regions: list[dict], width: float, height: float) -> list[dict]:
+def layout_parts(regions: list[dict], width: float, height: float, raster: dict | None = None) -> list[dict]:
     """A page's layout regions as the parts the person edits (`ocrmaker.layout_review`), every region locked."""
     parts, previous = [], None
     for region in regions:
@@ -1215,7 +1218,7 @@ def layout_parts(regions: list[dict], width: float, height: float) -> list[dict]
                           "continues": bool(parts) and region["article"] == parts[-1]["article"],
                           "article": region["article"], "regions": []})
             previous = number
-        parts[-1]["regions"].append({"box": grid_box(region["bbox"], width, height),
+        parts[-1]["regions"].append({"box": grid_box(region["bbox"], width, height, raster),
                                      "orientation": region["orientation"], "locked": True})
     for part in parts:
         del part["article"]
@@ -1250,7 +1253,6 @@ def resolve(page: Page, answer: dict, parts: list[dict]) -> tuple[dict, list[str
     current = {label: (p, region) for p, part in enumerate(parts) for label, region in zip(labels[p], part["regions"])}
     locked = [label for label, (_, region) in current.items() if region["locked"]]
     problems, seen, placed, sequence, resolved = [], set(), {}, [], []
-    width, height = page.rect.width, page.rect.height
     for part in answer["parts"]:
         regions, owner = [], None
         for region in part["regions"]:
@@ -1265,7 +1267,7 @@ def resolve(page: Page, answer: dict, parts: list[dict]) -> tuple[dict, list[str
             p, kept = current[keep]
             item = {"box": kept["box"], "orientation": kept["orientation"], "keep": keep}
             if kept["locked"]:
-                item["fixed"] = page_box(kept["box"], width, height)
+                item["fixed"] = page.to_page(kept["box"])
                 placed[keep] = len(resolved)
                 sequence.append(keep)
                 owner = p if owner is None else owner
@@ -1340,10 +1342,9 @@ def redo_page(page: Page, ask, image: Path, parts: list[dict], note: str) -> tup
 def drawn_page(page: Page, parts: list[dict]) -> dict:
     """A page's layout as the person drew it (`parts`), every region kept exactly and only checked; the result
     entry of an approved page the person changed (source "manual")."""
-    width, height = page.rect.width, page.rect.height
     answer = {"parts": [{"kind": part["kind"], "title": part["title"], "continues": part["continues"],
                          "regions": [{"box": region["box"], "orientation": region["orientation"],
-                                      "fixed": page_box(region["box"], width, height)}
+                                      "fixed": page.to_page(region["box"])}
                                      for region in part["regions"]]} for part in parts]}
     snapped = snap(page, answer)
     return {"index": page.n - 1, "method": "regions", "source": "manual", "reason": None, "requests": 0,
