@@ -1,19 +1,20 @@
-"""Local OCR: Tesseract 5 reads every prepared working raster into lines, words and chars (ADR 0005).
+"""Local OCR: Tesseract 5 reads every layout region of the prepared working rasters into lines, words and chars
+(ADR 0005, ADR 0006).
 
-Tesseract's automatic page segmentation can drop an isolated short line, typically a centred page number in
-the footer. So uncovered line-like ink in the page's top and bottom bands (`inkgaps.uncovered_edge_lines`)
-is read again as a single text line, and what Tesseract reads there with at least RECOVERED_CONFIDENCE
-becomes a line of its own. It also drops whole regions it takes for pictures, typically text on a screened grey
-background and sometimes a headline; so the page is read once more with every recognised line erased and the
-paper evened out (`inkgaps.cleared_page`), and the lines read there with RECOVERED_CONFIDENCE are added too,
-unless they are much lower than the page's lines: erasing a neighbouring line cuts off the tops or bottoms of
-letters Tesseract missed, and what is read in such a sliver is a guess (it stays an unreadable word instead).
-Then words Tesseract merged over a narrow space ("19.2.2000" for "19. 2. 2000") are cut at it
-(`inkgaps.split_narrow_spaces`), and the ink gap finder adds empty word boxes for ink inside lines no word covers.
+A region is read like a page of its own (`recognise_page`). Tesseract's automatic page segmentation can drop an
+isolated short line, typically a centred page number in the footer. So uncovered line-like ink in the page's top
+and bottom bands (`inkgaps.uncovered_edge_lines`) is read again as a single text line, and what Tesseract reads
+there with at least RECOVERED_CONFIDENCE becomes a line of its own. It also drops whole regions it takes for
+pictures, typically text on a screened grey background and sometimes a headline; so the page is read once more
+with every recognised line erased and the paper evened out (`inkgaps.cleared_page`), and the lines read there with
+RECOVERED_CONFIDENCE are added too, unless they are much lower than the page's lines: erasing a neighbouring line
+cuts off the tops or bottoms of letters Tesseract missed, and what is read in such a sliver is a guess (it stays
+an unreadable word instead). Then words Tesseract merged over a narrow space ("19.2.2000" for "19. 2. 2000") are
+cut at it (`inkgaps.split_narrow_spaces`), and the ink gap finder adds empty word boxes for ink inside lines no
+word covers.
 
-On a page divided into layout regions (ADR 0006, the Layout regions result) each region is read like that on its
-own, turned upright by its orientation (`recognise_regions`); ink outside every region is not read. The page is
-also read whole, and what only that reading found inside an upright region is taken over (`with_page_words`).
+Each region is turned upright by its orientation (`recognise_regions`); ink outside every region is not read. The
+page is also read whole, and what only that reading found inside an upright region is taken over (`with_page_words`).
 
 The result format is described in `ocrmaker.words`; all geometry is in source page coordinates.
 """
@@ -226,11 +227,8 @@ class OcrStep(Step):
                 started = time.monotonic()
                 raster = page["raster"]
                 raster_path = ctx.result(raster["step"]).path(raster["file"])
-                if divided is None:
-                    recognised = recognise_page(recognizer, page, raster_path)
-                else:
-                    recognised = recognise_regions(recognizer, page, raster_path, divided.get(page["index"], []),
-                                                   Path(workdir))
+                recognised = recognise_regions(recognizer, page, raster_path, divided.get(page["index"], []),
+                                               Path(workdir))
                 ctx.output.write_json(page_file(page["index"]), recognised)
                 # Word count and mean confidence describe Tesseract's readings; empty word boxes are counted apart.
                 confidences = [word["confidence"] for word in page_words(recognised) if word["text"]]

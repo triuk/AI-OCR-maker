@@ -1,6 +1,6 @@
 """Layout regions: the AI divides a page into its articles in reading order, one rectangle per column (ADR 0006).
 
-Method v8 of the regions prototype (`benchmark/prototypes/regions/regions3.py`), per page:
+Method v8 (benchmark/JOURNAL.md, round 2026-11-11 layout-regions), per page:
   1. one AI request: the page preview (the working raster, longer side LONG_SIDE px) with a faint labelled grid in
      0..1000 units; the answer lists the page's articles of kind article, header, footer or ad in reading order,
      each with regions (`box` in grid units, `orientation` 0/90/180/270/stacked). An answer in image pixels
@@ -26,7 +26,7 @@ Geometry: boxes are kept in grid units of the page (0..1000 along each side of t
 source page coordinates (`pt`).
 
 The Layout regions result (`steps/regions/`, see `ocrmaker.steps.regions_step`) holds per page
-    {"index": 0, "method": "regions", "source": "ai" | "failed" | "manual", "reason": str | None,
+    {"index": 0, "source": "ai" | "failed" | "manual", "reason": str | None,
      "round": 1,                              # the layout round that last laid the page out
      "note": str | None,                      # the layout note sent with the page in that round
      "regions": [{"id": "p1-r1", "article": 1, "column": 1, "continues": false,    # continues the previous region's article
@@ -1146,7 +1146,7 @@ def layout_page(page: Page, ask, image: Path) -> dict:
     ask(data, image) returns the AI's parsed answer, or None when it was not asked (AI unavailable); it raises
     ValueError with the reason for an invalid answer. Without a usable first answer the page gets one region over
     the whole page (`source` "failed" with the reason)."""
-    entry = {"index": page.n - 1, "method": "regions", "source": "ai", "reason": None, "round": 1, "note": None,
+    entry = {"index": page.n - 1, "source": "ai", "reason": None, "round": 1, "note": None,
              "requests": 0, "chosen": "first"}
     first = None
     try:
@@ -1299,7 +1299,7 @@ def redo_page(page: Page, ask, image: Path, parts: list[dict], note: str) -> tup
     docstring). ask(data, image) as in `layout_page`, with the redo instructions and schema. Returns the result
     entry, or None with the reason when the AI gave no answer that keeps the locks (the page then stays as the
     person left it)."""
-    entry = {"index": page.n - 1, "method": "regions", "source": "ai", "reason": None, "note": note or None,
+    entry = {"index": page.n - 1, "source": "ai", "reason": None, "note": note or None,
              "requests": 0, "chosen": "first"}
     known = {label for labels in region_labels(parts) for label in labels}
     data = redo_data(parts, note)
@@ -1347,7 +1347,7 @@ def drawn_page(page: Page, parts: list[dict]) -> dict:
                                       "fixed": page.to_page(region["box"])}
                                      for region in part["regions"]]} for part in parts]}
     snapped = snap(page, answer)
-    return {"index": page.n - 1, "method": "regions", "source": "manual", "reason": None, "requests": 0,
+    return {"index": page.n - 1, "source": "manual", "reason": None, "requests": 0,
             "chosen": None, "regions": page_regions(page, answer, snapped),
             "spots": [[round(v, 2) for v in spot["box"]] for spot in snapped["spots"]],
             "check": check(page, answer, snapped)}
@@ -1358,12 +1358,7 @@ def region_degrees(region: dict) -> int:
     return 0 if region["orientation"] == "stacked" else int(region["orientation"])
 
 
-def divided_pages(ctx) -> dict[int, list[dict]] | None:
-    """For a step after Layout (regions): the layout regions of every page by page index, or None when the pages
-    were not divided into regions (the setting `layout_method` "blocks", or no Layout regions result)."""
-    if not ctx.has_result(REGIONS_STEP):
-        return None
+def divided_pages(ctx) -> dict[int, list[dict]]:
+    """For a step after Layout (regions): the layout regions of every page by page index."""
     data = ctx.result(REGIONS_STEP).read_json(REGIONS_FILE)
-    if data["method"] != "regions":
-        return None
     return {entry["index"]: entry["regions"] for entry in data["pages"]}

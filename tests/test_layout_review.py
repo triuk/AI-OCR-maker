@@ -24,13 +24,13 @@ def pdf(tmp_path_factory):
 
 
 def started(tmp_path, pdf, *answers, steps=LOCAL, settings=None):
-    """A project of the two crossing pages run with layout regions and scripted AI layout answers."""
+    """A project of the two crossing pages run with layout rounds and scripted AI layout answers."""
     provider = ScriptedProvider().on(regions.PURPOSE, *(answers or (READING,)))
     shipped = implementations()
     workflow = Workflow(ProjectStore(tmp_path / "library"), language=provider,
                         steps={step: shipped[step] for step in steps})
     project = workflow.create(pdf)
-    workflow.update_settings(project["id"], {"layout_method": "regions", **(settings or {})})
+    workflow.update_settings(project["id"], {"layout_auto_approve": False, **(settings or {})})
     return workflow, provider, workflow.run(project["id"])
 
 
@@ -227,7 +227,7 @@ def language_provider():
 def test_the_layout_editor_api_saves_edits_and_runs_rounds_and_approval(client, workflow, pdf):
     with open(pdf, "rb") as source:
         pid = client.post("/api/projects", files={"source": ("zpravodaj.pdf", source, "application/pdf")}).json()["id"]
-    client.put(f"/api/projects/{pid}/settings", json={"layout_method": "regions"})
+    client.put(f"/api/projects/{pid}/settings", json={"layout_auto_approve": False})
     assert client.post(f"/api/projects/{pid}/run").status_code == 202
     workflow.wait(pid, timeout=120)
     view = client.get(f"/api/projects/{pid}/layout").json()

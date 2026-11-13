@@ -1,16 +1,17 @@
-"""Layout: builds blocks (paragraphs in columns, headings, captions, running headers and footers, tables) from
-the recognised lines and words, so that every word belongs to exactly one block (ADR 0005).
+"""Blocks: builds blocks (paragraphs in columns, headings, captions, running headers and footers, tables) inside
+each layout region from the recognised lines and words, so that every word belongs to exactly one block
+(`ocrmaker.layout.build_regions`).
 
-The result format is described in `ocrmaker.layout`. Ads are recognised later, from the page image, by
-Reading order; once it has run, the step preview shows the blocks it put into an "ad" article as ads (kind
-"ad", with Layout's own kind as "layout_kind"). The Layout result itself keeps Layout's kinds.
+The result format is described in `ocrmaker.layout`. Ads are layout regions of kind ad; once Reading order has
+run, the step preview shows the blocks of an "ad" article as ads (kind "ad", with Layout's own kind as
+"layout_kind"). The Layout result itself keeps Layout's kinds.
 """
 from __future__ import annotations
 
 import time
 from collections import Counter
 
-from ..layout import LAYOUT_FILE, block_words, build_page, build_regions, page_file
+from ..layout import LAYOUT_FILE, block_words, build_regions, page_file
 from ..pages import PREPARED_STEP, read_pages
 from ..regions import divided_pages
 from ..reading_order import ORDER_FILE, ORDER_STEP
@@ -49,10 +50,7 @@ class LayoutStep(Step):
             recognised = read_page(ocr, page["index"]) or {"lines": []}
             raster = page["raster"]
             rules = page_rules(ctx.result(raster["step"]).path(raster["file"]), raster)
-            if divided is None:
-                layout = build_page(page, recognised, rules)
-            else:
-                layout = build_regions(page, recognised, rules, divided.get(page["index"], []))
+            layout = build_regions(page, recognised, rules, divided.get(page["index"], []))
             ctx.output.write_json(page_file(page["index"]), layout)
             kinds = dict(Counter(block["kind"] for block in layout["blocks"]))
             summaries.append({"index": page["index"], "file": page_file(page["index"]),

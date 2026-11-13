@@ -1,36 +1,18 @@
-"""Seam 1 with real Tesseract: Layout builds blocks and Reading order puts them into articles for the OCR PDF."""
+"""Seam 1 with real Tesseract: Layout (blocks) builds the blocks inside each layout region in reading order."""
 from __future__ import annotations
 
-from collections import Counter
 from difflib import SequenceMatcher
 
 import pymupdf
-import pytest
 
-from fakes import ScriptedProvider, answer_spots, run_and_export
-from layout_pdfs import CROSSING, CROSSING_COLUMNS, CROSSING_READING, RULES, TABLE_ROWS, Print, Rule, printed_pdf
-from ocrmaker.language import LanguageError
+from fakes import ScriptedProvider
+from layout_pdfs import RULES, Print, Rule, printed_pdf
 from ocrmaker.step import Step
 from ocrmaker.steps import implementations
 from ocrmaker.store import ProjectStore
 from ocrmaker.words import page_file
 from ocrmaker.workflow import Workflow
 from pdfs import CZECH_COLUMNS, printed_text_pdf, printed_words
-
-
-def article(*numbers, kind="article", continues=None) -> dict:
-    return {"kind": kind, "blocks": list(numbers), "continues": continues}
-
-
-def numbers_by_key(request, items) -> dict[str, int]:
-    """The block number of every printed item, found by the item's first word at the start of a block."""
-    found = {}
-    for item in items:
-        matches = [block["number"] for block in request.data["blocks"]
-                   if block["starts"].split()[:1] == item.words[:1]]
-        assert len(matches) == 1, f"no single block starts with {item.words[0]!r}: {request.data['blocks']}"
-        found[item.key] = matches[0]
-    return found
 
 
 def extracted_words(workflow, project, page: int = 0) -> list[str]:
@@ -44,284 +26,8 @@ def words_of(items, keys) -> list[str]:
     return [word for key in keys for word in by_key[key].words]
 
 
-def ocr_words(workflow, project, page: int) -> list[str]:
-    return [word["text"] for word in workflow.overlay(project["id"], "ocr", page)["words"]]
-
-
-def states(project) -> dict:
-    return {step["id"]: step for step in project["steps"]}
-
-
 def similarity(words, expected) -> float:
     return SequenceMatcher(None, words, expected).ratio()
-
-
-@pytest.fixture(scope="module")
-def crossing(tmp_path_factory):
-    """One recognised two-column page with two crossing articles; tests rerun Reading order with own answers."""
-    directory = tmp_path_factory.mktemp("crossing")
-    provider = ScriptedProvider().on("readthrough", {"words": []})
-    provider.on("reading_order", lambda request: {"articles": [
-        article(*(numbers_by_key(request, CROSSING)[key] for key in CROSSING_READING))]})
-    workflow = Workflow(ProjectStore(directory / "library"), language=provider)
-    project = run_and_export(workflow,
-                             workflow.create(printed_pdf(directory / "zpravodaj-2000-05.pdf", [CROSSING]))["id"])
-    return workflow, provider, project
-
-
-def rerun_order(crossing, *answers):
-    workflow, provider, project = crossing
-    provider.requests.clear()
-    provider.on("reading_order", *answers)
-    project = workflow.rerun(project["id"], "order")
-    # The rerun goes on up to manual review; an export then writes the outputs, as the user would.
-    if states(project)["order"]["state"] in ("done", "warning"):
-        project = workflow.export(project["id"])
-    return project
-
-
-def test_the_ocr_pdf_text_follows_the_articles_in_the_ai_reading_order(crossing):
-    workflow, provider, _ = crossing
-
-    def by_article(request):
-        number = numbers_by_key(request, CROSSING)
-        return {"articles": [article(number["A-head"], number["A1"], number["A2"]),
-                             article(number["B-head"], number["B1"], number["B2"])]}
-    project = rerun_order(crossing, by_article)
-
-    assert states(project)["order"]["state"] == "done"
-    assert states(project)["export"]["state"] == "done"
-    words = extracted_words(workflow, project)
-    assert similarity(words, words_of(CROSSING, CROSSING_READING)) > 0.95
-    assert similarity(words, words_of(CROSSING, CROSSING_COLUMNS)) < 0.9
-    order = workflow.result(project["id"], "order").read_json("order.json")
-    assert [item["kind"] for item in order["pages"][0]["articles"]] == ["article", "article"]
-    assert order["pages"][0]["source"] == "ai"
-
-
-def test_layout_puts_every_word_into_exactly_one_block_of_the_right_kind(crossing):
-    workflow, _, project = crossing
-    layout = workflow.result(project["id"], "layout").read_json("pages/page-0001.json")
-    ocr = workflow.overlay(project["id"], "ocr", 0)
-
-    in_blocks = [word for block in layout["blocks"] for line in block["lines"] for word in line]
-    assert sorted(in_blocks) == sorted(word["id"] for word in ocr["words"])
-    assert len(layout["blocks"]) == len(CROSSING)
-    texts = {word["id"]: word["text"] for word in ocr["words"]}
-    kinds = {texts[block["lines"][0][0]]: block["kind"] for block in layout["blocks"]}
-    assert kinds == {"Oprava": "heading", "Obecní": "body", "Nové": "heading", "Knihovna": "body",
-                     "Stavební": "body", "Čtenáři": "body"}
-    assert len(layout["columns"]) == 2
-
-
-@pytest.mark.parametrize("answer", [
-    "not json",
-    {"articles": []},
-    {"order": [1, 2, 3]},
-    "missing",
-    "twice",
-    "unknown",
-    "bad continuation",
-], ids=["not-json", "empty", "no-articles", "missing-block", "block-twice", "unknown-block", "bad-continuation"])
-def test_an_invalid_answer_falls_back_to_the_geometric_order_with_a_warning_and_loses_no_text(crossing, answer):
-    workflow, _, _ = crossing
-
-    def broken(request):
-        numbers = [block["number"] for block in request.data["blocks"]]
-        return {"missing": {"articles": [article(*numbers[1:])]},
-                "twice": {"articles": [article(*numbers), article(numbers[0])]},
-                "unknown": {"articles": [article(*numbers, 99)]},
-                "bad continuation": {"articles": [article(*numbers, continues="p0-a1")]}}[answer]
-    scripted = answer in ("missing", "twice", "unknown", "bad continuation")
-    project = rerun_order(crossing, broken if scripted else answer)
-
-    order_state = states(project)["order"]
-    assert order_state["state"] == "warning"
-    assert "geometrické" in order_state["message"]
-    assert states(project)["export"]["state"] == "done"
-    words = extracted_words(workflow, project)
-    assert Counter(words) == Counter(ocr_words(workflow, project, 0))
-    # The geometric order reads the columns left to right, each top to bottom.
-    assert similarity(words, words_of(CROSSING, CROSSING_COLUMNS)) > 0.95
-    order = workflow.result(project["id"], "order").read_json("order.json")
-    assert order["pages"][0]["source"] == "geometric"
-    assert order["pages"][0]["reason"]
-
-
-def test_a_failed_ai_connection_fails_the_step_with_its_czech_message(crossing):
-    project = rerun_order(crossing, LanguageError("Byl vyčerpán limit předplatného.", code="usage_limit"))
-
-    assert states(project)["order"]["state"] == "failed"
-    assert "limit předplatného" in states(project)["order"]["message"]
-    assert states(project)["export"]["state"] == "pending"
-
-
-def test_without_any_ai_provider_the_order_is_geometric_with_a_warning(tmp_path):
-    workflow = Workflow(ProjectStore(tmp_path / "library"))
-    project = run_and_export(workflow, workflow.create(printed_pdf(tmp_path / "zpravodaj.pdf", [CROSSING]))["id"])
-
-    assert states(project)["order"]["state"] == "warning"
-    assert "AI není k dispozici" in states(project)["order"]["message"]
-    assert similarity(extracted_words(workflow, project), words_of(CROSSING, CROSSING_COLUMNS)) > 0.95
-
-
-def test_the_request_shows_the_numbered_page_the_block_kinds_and_the_rules(crossing):
-    workflow, provider, project = crossing
-    rerun_order(crossing, lambda request: {"articles": [
-        article(*(block["number"] for block in request.data["blocks"]))]})
-    [request] = provider.requests_for("reading_order")
-
-    assert request.images and request.images[0].startswith(b"\x89PNG")
-    with pymupdf.open(stream=request.images[0], filetype="png") as image:
-        assert max(image[0].rect.width, image[0].rect.height) <= 1600
-    assert [block["number"] for block in request.data["blocks"]] == list(range(1, len(CROSSING) + 1))
-    assert {block["kind"] for block in request.data["blocks"]} == {"heading", "body"}
-    assert request.data["page"] == 1 and request.data["previous_page"] is None
-    for rule in ("exactly once", "continues", "header", "footer", "caption", "ad", "table"):
-        assert rule in request.instructions.lower()
-    assert request.schema["required"] == ["articles"]
-
-
-def test_the_step_previews_show_blocks_by_kind_and_numbered_articles_with_arrows(crossing):
-    workflow, _, _ = crossing
-
-    def by_article(request):
-        number = numbers_by_key(request, CROSSING)
-        return {"articles": [article(number["A-head"], number["A1"], number["A2"]),
-                             article(number["B-head"], number["B1"], number["B2"])]}
-    project = rerun_order(crossing, by_article)
-
-    layout = workflow.overlay(project["id"], "layout", 0)
-    assert {block["kind"] for block in layout["blocks"]} == {"heading", "body"}
-    assert all(len(block["bbox"]) == 4 and block["number"] and block["text"] for block in layout["blocks"])
-    order = workflow.overlay(project["id"], "order", 0)
-    assert [item["number"] for item in order["articles"]] == [1, 2]
-    first = order["articles"][0]
-    assert [block["number"] for block in first["blocks"]] == [1, 2, 5]  # heading, left column, right column
-    assert all(len(block["bbox"]) == 4 for item in order["articles"] for block in item["blocks"])
-
-
-@pytest.fixture(scope="module")
-def rules_run(tmp_path_factory):
-    """Two pages with headers, footers, a caption, an ad, a table and an article continued on page 2.
-
-    The scripted AI deliberately answers the groups out of order; the rules put each group where it belongs.
-    """
-    directory = tmp_path_factory.mktemp("rules")
-    provider = ScriptedProvider().on("readthrough", {"words": []})
-
-    def answer(request):
-        page = request.data["page"]
-        # The table is one block, found by its first cell.
-        number = numbers_by_key(request, [item for item in RULES[page - 1]
-                                          if not item.key.startswith("T-") or item.key == "T-r1"])
-        if page == 1:
-            return {"articles": [article(number["footer-1"], kind="footer"),
-                                 article(number["C-head"], number["C1"], number["caption-1"]),
-                                 article(number["ad-1"], kind="ad"),
-                                 article(number["E1"]),
-                                 article(number["header-1"], kind="header")]}
-        [continued] = [item["id"] for item in request.data["previous_page"]["articles"]
-                       if item["ends"].endswith("oplocení")]
-        return {"articles": [article(number["footer-2"], kind="footer"),
-                             article(number["F-head"], number["F1"], number["T-r1"]),
-                             article(number["E2"], continues=continued),
-                             article(number["header-2"], kind="header")]}
-    provider.on("reading_order", answer)
-    workflow = Workflow(ProjectStore(directory / "library"), language=provider)
-    project = run_and_export(workflow, workflow.create(printed_pdf(directory / "zpravodaj-2000-05.pdf", RULES))["id"])
-    return workflow, provider, project
-
-
-def test_headers_footers_ads_and_continuations_are_placed_by_the_rules(rules_run):
-    workflow, _, project = rules_run
-    assert states(project)["order"]["state"] == "done"
-
-    first = extracted_words(workflow, project, 0)
-    expected = words_of(RULES[0], ["header-1", "C-head", "C1", "caption-1", "E1", "ad-1", "footer-1"])
-    assert similarity(first, expected) > 0.95
-    second = extracted_words(workflow, project, 1)
-    table = [word for row in TABLE_ROWS for word in row]
-    expected = words_of(RULES[1], ["header-2", "E2", "F-head", "F1"]) + table + words_of(RULES[1], ["footer-2"])
-    assert similarity(second, expected) > 0.95
-
-    order = workflow.result(project["id"], "order").read_json("order.json")
-    kinds = [[item["kind"] for item in page["articles"]] for page in order["pages"]]
-    assert kinds == [["header", "article", "article", "ad", "footer"], ["header", "article", "article", "footer"]]
-    assert order["links"] == [{"from": "p1-a3", "to": "p2-a2"}]
-    assert order["pages"][1]["articles"][1]["continues"] == "p1-a3"
-
-
-# A form whose middle row is set in small print, which Layout takes for a caption by its size alone.
-FORM = [Print("title", (40, 40, 380, 62), "Zveme Vás na běh", 16),
-        Print("organiser", (40, 70, 380, 100), "Pořadatel: Sokolská župa Těšínská ve spolupráci s místní "
-              "tělocvičnou jednotou a městem."),
-        Print("place", (40, 104, 380, 116), "Místo konání: hřiště u základní školy na sídlišti", size=8),
-        Print("money", (40, 120, 380, 170), "Zúčastnit se můžete i formou peněžního příspěvku, který zašlete "
-              "na konto pro výzkum rakoviny u spořitelny.")]
-
-
-def test_small_print_inside_an_article_stays_where_the_ai_reads_it(tmp_path):
-    # Only the AI sees whether a block Layout calls a caption by its small size really captions a picture.
-    provider = ScriptedProvider().on("readthrough", {"words": []}).on("reconstruction", answer_spots())
-    provider.on("reading_order", lambda request: {"articles": [
-        article(*(numbers_by_key(request, FORM)[item.key] for item in FORM))]})
-    workflow = Workflow(ProjectStore(tmp_path / "library"), language=provider)
-    project = run_and_export(workflow, workflow.create(printed_pdf(tmp_path / "zpravodaj.pdf", [FORM]))["id"])
-
-    assert "caption" in [kind for kind, _ in block_texts(workflow, project)]
-    assert similarity(extracted_words(workflow, project), words_of(FORM, [item.key for item in FORM])) > 0.95
-
-
-def test_layout_recognises_headers_footers_headings_captions_and_tables(rules_run):
-    workflow, _, project = rules_run
-
-    for page in (0, 1):
-        layout = workflow.overlay(project["id"], "layout", page)
-        kinds = {block["text"].split()[0]: block["kind"] for block in layout["blocks"]}
-        assert kinds["Rychvaldský"] == "header"
-        assert kinds["strana"] == "footer"
-        ocr = workflow.overlay(project["id"], "ocr", page)
-        assert sum(block["words"] for block in layout["blocks"]) == len(ocr["words"])
-    first = {block["text"].split()[0]: block["kind"] for block in workflow.overlay(project["id"], "layout", 0)["blocks"]}
-    assert first["Hasiči"] == "heading" and first["Obr."] == "caption" and first["Sbor"] == "body"
-    second = workflow.overlay(project["id"], "layout", 1)["blocks"]
-    [table] = [block for block in second if block["kind"] == "table"]
-    assert table["text"].split() == [word for row in TABLE_ROWS for word in row]
-
-
-def test_the_layout_preview_shows_the_blocks_reading_order_put_into_an_ad_as_ads(rules_run, client):
-    workflow, _, project = rules_run
-
-    blocks = {block["text"].split()[0]: block for block in workflow.overlay(project["id"], "layout", 0)["blocks"]}
-    assert blocks["Prodám"]["kind"] == "ad" and blocks["Sbor"]["kind"] == "body"
-    stored = workflow.result(project["id"], "layout").read_json("pages/page-0001.json")["blocks"]
-    assert "ad" not in {block["kind"] for block in stored}  # Layout's own kinds stay as Layout decided them
-    script = client.get("/previews/layout.js").text
-    assert 'kind !== "ad"' not in script and '"inzerát"' in script
-
-
-def test_the_next_pages_request_offers_the_previous_pages_articles_for_continuation(rules_run):
-    _, provider, _ = rules_run
-    first, second = provider.requests_for("reading_order")[-2:]
-
-    assert first.data["previous_page"] is None
-    previous = second.data["previous_page"]
-    assert previous["page"] == 1
-    assert [item["id"] for item in previous["articles"]] == ["p1-a1", "p1-a2", "p1-a3", "p1-a4", "p1-a5"]
-    assert first.instructions == second.instructions
-
-
-def test_the_diagnostics_record_the_reading_order_ai_request_of_every_page(rules_run):
-    workflow, _, project = rules_run
-    records = workflow.diagnostics(project["id"])
-
-    requests = [record for record in records if record["kind"] == "ai_request" and record["purpose"] == "reading_order"]
-    assert len(requests) == 2 and all(record["outcome"] == "ok" for record in requests)
-    pages = [record for record in records if record["kind"] == "reading_order"]
-    assert [(record["index"], record["source"]) for record in pages] == [(0, "ai"), (1, "ai")]
-    assert all(record["provider"] == "claude" and record["model"] == "scripted-model" and record["usage"]
-               for record in pages)
 
 
 CONCERT = [Print("title", (40, 40, 380, 60), "Jarní koncert", 16),
@@ -336,14 +42,11 @@ CONCERT = [Print("title", (40, 40, 380, 60), "Jarní koncert", 16),
 LAYOUT_STEPS = ("import", "prepare", "regions", "ocr", "layout")
 
 
-def laid_out(tmp_path, items, method="blocks", parts=None):
-    """A page printed from the items, laid out by Layout's blocks method (the whole workflow, no AI) or divided into
-    layout regions first (ADR 0006; the steps up to Layout). `parts` lists the regions' articles, each a list of
-    regions, each a list of item keys; by default one region holds every item."""
+def laid_out(tmp_path, items, parts=None, kinds=None, steps=LAYOUT_STEPS):
+    """A page printed from the items, divided into layout regions (ADR 0006) and run through `steps` (by default
+    up to Layout). `parts` lists the regions' articles, each a list of regions, each a list of item keys, and
+    `kinds` their kinds (article by default); by default one region holds every item."""
     pdf = printed_pdf(tmp_path / "zpravodaj.pdf", [items])
-    if method == "blocks":
-        workflow = Workflow(ProjectStore(tmp_path / "library"), language=None)
-        return workflow, workflow.run(workflow.create(pdf)["id"])
     by_key = {item.key: item.rect for item in items}
 
     def box(keys, pad=4):
@@ -351,14 +54,14 @@ def laid_out(tmp_path, items, method="blocks", parts=None):
         x0, y0 = min(r[0] for r in rects) - pad, min(r[1] for r in rects) - pad
         x1, y1 = max(r[2] for r in rects) + pad, max(r[3] for r in rects) + pad
         return [round(x0 * 1000 / 420), round(y0 * 1000 / 595), round(x1 * 1000 / 420), round(y1 * 1000 / 595)]
-    answer = {"parts": [{"kind": "article", "title": "", "regions": [{"box": box(keys), "orientation": "0"}
-                                                                    for keys in regions]}
-                        for regions in parts or [[list(by_key)]]]}
+    parts = parts or [[list(by_key)]]
+    answer = {"parts": [{"kind": kind, "title": "", "regions": [{"box": box(keys), "orientation": "0"}
+                                                                for keys in regions]}
+                        for regions, kind in zip(parts, kinds or ["article"] * len(parts))]}
     shipped = implementations()
     workflow = Workflow(ProjectStore(tmp_path / "library"), language=ScriptedProvider().on("layout_regions", answer),
-                        steps={step: shipped[step] for step in LAYOUT_STEPS})
+                        steps={step: shipped[step] for step in steps})
     project = workflow.create(pdf)
-    workflow.update_settings(project["id"], {"layout_method": "regions", "layout_auto_approve": True})
     return workflow, workflow.run(project["id"])
 
 
@@ -371,9 +74,8 @@ def block_texts(workflow, project, page: int = 0) -> list[tuple[str, str]]:
             for block in layout["blocks"]]
 
 
-@pytest.mark.parametrize("method", ["blocks", "regions"])
-def test_a_one_word_last_line_of_a_paragraph_stays_in_the_paragraph(tmp_path, method):
-    workflow, project = laid_out(tmp_path, CONCERT, method)
+def test_a_one_word_last_line_of_a_paragraph_stays_in_the_paragraph(tmp_path):
+    workflow, project = laid_out(tmp_path, CONCERT)
 
     texts = block_texts(workflow, project)
     assert [kind for kind, _ in texts] == ["heading", "body", "body"]
@@ -388,11 +90,10 @@ BUS = [Print("title", (40, 40, 300, 62), "Do nového domu již jezdí autobus", 
              "vrací se odpoledne ze zastávky u pošty.")]
 
 
-@pytest.mark.parametrize("method", ["blocks", "regions"])
-def test_a_heading_over_two_columns_does_not_take_the_first_line_of_one_column(tmp_path, method):
+def test_a_heading_over_two_columns_does_not_take_the_first_line_of_one_column(tmp_path):
     # The right column's first line, narrow and within the heading's width, looked like the heading's short
     # last line; that exception is meant for a last line Tesseract measures larger, never for smaller text.
-    workflow, project = laid_out(tmp_path, BUS, method, [[["title"], ["left"], ["right"]]])
+    workflow, project = laid_out(tmp_path, BUS, [[["title"], ["left"], ["right"]]])
 
     texts = block_texts(workflow, project)
     assert texts[0] == ("heading", "Do nového domu již jezdí autobus")
@@ -408,11 +109,10 @@ NEIGHBOURS = [Print("carnival", (40, 40, 172, 60), "Karnevalové show 2000", 13)
                     "očkování psů starších tří měsíců proti vzteklině.")]
 
 
-@pytest.mark.parametrize("method", ["blocks", "regions"])
-def test_two_headings_side_by_side_in_different_sizes_are_blocks_of_their_own(tmp_path, method):
+def test_two_headings_side_by_side_in_different_sizes_are_blocks_of_their_own(tmp_path):
     # Tesseract reads both headings as one line; the gap between them is narrow for their size, but the size
     # changes there, so they are two headings.
-    workflow, project = laid_out(tmp_path, NEIGHBOURS, method,
+    workflow, project = laid_out(tmp_path, NEIGHBOURS,
                                  [[["carnival", "carnival text"]], [["vaccination", "vaccination text"]]])
 
     texts = [text for _, text in block_texts(workflow, project)]
@@ -435,9 +135,8 @@ TIMETABLE = [Print("time1", (40, 40, 75, 54), "11.48"),
              Print("item2", (75, 208, 300, 222), "v pracovních dnech od osmi do šestnácti hodin")]
 
 
-@pytest.mark.parametrize("method", ["blocks", "regions"])
-def test_a_time_or_bullet_a_wide_gap_before_its_text_is_read_with_that_text(tmp_path, method):
-    workflow, project = laid_out(tmp_path, TIMETABLE, method)
+def test_a_time_or_bullet_a_wide_gap_before_its_text_is_read_with_that_text(tmp_path):
+    workflow, project = laid_out(tmp_path, TIMETABLE)
 
     texts = [text for _, text in block_texts(workflow, project)]
     assert " ".join(texts).split() == words_of(TIMETABLE, [item.key for item in TIMETABLE])
@@ -463,9 +162,8 @@ PROGRAMME = [Print("date1", (40, 40, 100, 54), "2. a 3. 5."),
              Print("value3", (120, 190, 330, 204), "Hřiště u základní školy na sídlišti")]
 
 
-@pytest.mark.parametrize("method", ["blocks", "regions"])
-def test_a_column_of_dates_or_form_labels_is_read_row_by_row_with_the_text_beside_it(tmp_path, method):
-    workflow, project = laid_out(tmp_path, PROGRAMME, method)
+def test_a_column_of_dates_or_form_labels_is_read_row_by_row_with_the_text_beside_it(tmp_path):
+    workflow, project = laid_out(tmp_path, PROGRAMME)
 
     texts = [text for _, text in block_texts(workflow, project)]
     assert " ".join(texts).split() == words_of(PROGRAMME, [item.key for item in PROGRAMME])
@@ -492,9 +190,8 @@ BIRTHS = [Print("title", (40, 30, 200, 50), "Narodili se", 14),
                 "a radosti do života.")]
 
 
-@pytest.mark.parametrize("method", ["blocks", "regions"])
-def test_a_table_under_a_rule_below_its_column_headings_is_read_row_by_row(tmp_path, method):
-    workflow, project = laid_out(tmp_path, BIRTHS, method)
+def test_a_table_under_a_rule_below_its_column_headings_is_read_row_by_row(tmp_path):
+    workflow, project = laid_out(tmp_path, BIRTHS)
 
     texts = block_texts(workflow, project)
     assert [text for kind, text in texts if kind == "table"] == [" ".join(cell for row in BIRTH_ROWS for cell in row)]
@@ -516,9 +213,8 @@ RULED_COLUMNS = [Print("a-left", (40, 40, 200, 98), "Obecní zastupitelstvo schv
                        "vyšší soutěže, kde se utkají s týmy z celého kraje.")]
 
 
-@pytest.mark.parametrize("method", ["blocks", "regions"])
-def test_a_rule_between_articles_in_columns_is_no_table(tmp_path, method):
-    workflow, project = laid_out(tmp_path, RULED_COLUMNS, method,
+def test_a_rule_between_articles_in_columns_is_no_table(tmp_path):
+    workflow, project = laid_out(tmp_path, RULED_COLUMNS,
                                  [[["a-left", "a-end"]], [["b-left"]], [["c-right", "c-end"]], [["d-right"]]])
 
     texts = [text for kind, text in block_texts(workflow, project) if kind != "table"]
@@ -549,9 +245,10 @@ class StrayOcr(Step):
                 count += 1
                 words.append({"id": f"p1-w{count}", "text": text, "bbox": [round(v, 2) for v in box],
                               "confidence": 96.0, "chars": []})
-            return {"id": f"p1-l{len(lines) + 1}", "bbox": [words[0]["bbox"][0], min(w["bbox"][1] for w in words),
-                                                           words[-1]["bbox"][2], max(w["bbox"][3] for w in words)],
-                    "baseline": None, "block": 0, "paragraph": 0, "words": words}
+            box = [words[0]["bbox"][0], min(w["bbox"][1] for w in words), words[-1]["bbox"][2],
+                   max(w["bbox"][3] for w in words)]
+            return {"id": f"p1-l{len(lines) + 1}", "region": "p1-r1", "bbox": box, "baseline": None, "block": 0,
+                    "paragraph": 0, "words": words}
 
         for items in rows.values():
             lines.append(line(items))
@@ -571,3 +268,39 @@ def test_a_small_stray_artefact_below_a_paragraph_joins_the_paragraph(tmp_path):
 
     [(kind, written)] = block_texts(workflow, project)
     assert kind == "body" and set(written.split()[-2:]) == {"-", "."}
+
+
+def test_layout_takes_headers_footers_and_ads_from_the_regions_and_headings_and_captions_from_the_size(tmp_path,
+                                                                                                         client):
+    first = RULES[0]
+    workflow, project = laid_out(tmp_path, first,
+                                 [[["header-1"]], [["C-head", "C1"], ["caption-1"]], [["E1"]], [["ad-1"]],
+                                  [["footer-1"]]],
+                                 ["header", "article", "article", "ad", "footer"], LAYOUT_STEPS + ("order",))
+
+    blocks = {block["text"].split()[0]: block for block in workflow.overlay(project["id"], "layout", 0)["blocks"]}
+    kinds = {word: block["kind"] for word, block in blocks.items()}
+    assert kinds == {"Rychvaldský": "header", "Hasiči": "heading", "Sbor": "body", "Obr.": "caption",
+                     "Zastupitelé": "body", "Prodám": "ad", "strana": "footer"}
+    # The preview shows the blocks of an ad article as ads; Layout's own kinds stay as Layout decided them.
+    stored = workflow.result(project["id"], "layout").read_json(page_file(0))["blocks"]
+    assert "ad" not in {block["kind"] for block in stored}
+    script = client.get("/previews/layout.js").text
+    assert 'kind !== "ad"' not in script and '"inzerát"' in script
+
+
+# A form whose middle row is set in small print, which Layout takes for a caption by its size alone.
+FORM = [Print("title", (40, 40, 380, 62), "Zveme Vás na běh", 16),
+        Print("organiser", (40, 70, 380, 100), "Pořadatel: Sokolská župa Těšínská ve spolupráci s místní "
+              "tělocvičnou jednotou a městem."),
+        Print("place", (40, 104, 380, 116), "Místo konání: hřiště u základní školy na sídlišti", size=8),
+        Print("money", (40, 120, 380, 170), "Zúčastnit se můžete i formou peněžního příspěvku, který zašlete "
+              "na konto pro výzkum rakoviny u spořitelny.")]
+
+
+def test_small_print_inside_an_article_stays_where_it_stands(tmp_path):
+    workflow, project = laid_out(tmp_path, FORM)
+
+    texts = block_texts(workflow, project)
+    assert "caption" in [kind for kind, _ in texts]
+    assert similarity(" ".join(text for _, text in texts).split(), words_of(FORM, [item.key for item in FORM])) > 0.95

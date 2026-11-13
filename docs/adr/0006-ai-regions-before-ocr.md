@@ -2,8 +2,8 @@
 
 Supersedes the reading-order half of ADR 0005; Tesseract stays the single source of words and geometry.
 
-Layout now runs right after image preparation and before Local OCR. One AI request per page (method v8 of the regions
-prototype, `benchmark/prototypes/regions/`) returns the page's articles of kind article, header, footer or ad in
+Layout now runs right after image preparation and before Local OCR. One AI request per page (method v8 of a throwaway
+prototype, now `src/ocrmaker/regions.py`) returns the page's articles of kind article, header, footer or ad in
 reading order, each as one or more regions: rectangles holding one column of one article, read top to bottom, with an
 orientation. Regions are snapped to the ink they own and checked against a throwaway whole-page Tesseract pass (words
 outside or in two regions, an edge through a line, two columns in one region, overlaps, uncovered ink, a lost line); one
@@ -25,6 +25,6 @@ and the user's costly fixes are adding a region and renumbering, not resizing on
 each later piece of work (OCR, order inside a region, AI requests) to one smaller logical unit. In the prototype
 benchmark (31 pages, three runs) v8 left 0–3 pages needing a costly fix with Claude haiku (high effort, the default)
 against 11–15 for the old method. Uncovered text is never rescued automatically: it is shown in review instead, so
-nothing is silently assigned to the wrong article. The old method stays selectable by the setting `layout_method`. The program's benchmark (benchmark/JOURNAL.md,
-2026-11-11) found the new method far better in reading order and 0.3–0.5 points lower in text accuracy; the user
-chose reading order, so "regions" is the default since 2026-11-13.
+nothing is silently assigned to the wrong article. The program's benchmark (benchmark/JOURNAL.md, 2026-11-11) found
+the new method far better in reading order and 0.3–0.5 points lower in text accuracy; the user chose reading order,
+and on 2026-11-13 the old method was removed (git tag `layout-blocks-last`).

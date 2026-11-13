@@ -21,10 +21,10 @@
   function describe(overlay, page) {
     if (!overlay) return `Strana ${page.index + 1}: bez pořadí čtení`;
     const articles = overlay.articles.filter(item => item.kind === "article").length;
-    const source = {ai: "pořadí určila AI", geometric: "geometrické pořadí (náhradní)", empty: "bez textu"}[overlay.source] || overlay.source;
+    const source = {regions: "pořadí z rozvržení", empty: "bez textu"}[overlay.source] || overlay.source;
     const continued = overlay.articles.filter(item => item.continues).map(item => `${item.number} navazuje na ${item.continues}`);
     return `Strana ${page.index + 1}: ${articles} článků, ${source}` + (continued.length ? ` · ${continued.join(", ")}` : "")
-      + (overlay.source === "geometric" && overlay.reason ? ` · důvod: ${overlay.reason}` : "");
+      + (overlay.reason ? ` · nepropojeno: ${overlay.reason}` : "");
   }
 
   function draw(layer, overlay, page) {

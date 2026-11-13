@@ -20,7 +20,6 @@ from . import existing_text, layout_review, providers, report, review
 from . import settings as project_settings
 from .diagnostics import Diagnostics, new_run_id
 from .errors import Conflict, ConfirmationRequired, StepError, StepInterrupted
-from .files import read_json
 from .language import LanguageError, LanguageProvider, LanguageProviders, LanguageSession
 from .pages import PAGES_STEP, PREPARED_STEP, read_pages
 from .regions import REGIONS_FILE, REGIONS_STEP
@@ -38,7 +37,7 @@ PROGRESS_INTERVAL = 0.25
 # Manual corrections belong to the review; rerunning a step before it discards them (ADR 0004).
 FIRST_MANUAL = next(index for index, definition in enumerate(STEPS) if definition.manual)
 # The project's "layout" (ADR 0006): the layout regions wait for the person (a run stops after Layout) or are
-# approved; None while there are none (the blocks method, or Layout not run yet).
+# approved; None while there are none (Layout not run yet).
 WAITING, APPROVED = layout_review.WAITING, layout_review.APPROVED
 AFTER_LAYOUT = STEP_IDS[STEP_IDS.index(REGIONS_STEP) + 1:]
 # The Check AI request: as small as a request can be, and still a structured one like the steps send.
@@ -442,10 +441,7 @@ class Workflow:
         result = self._stored_result(project_id, REGIONS_STEP)
         if result is None or not result.exists(REGIONS_FILE):
             raise ValueError("Rozvržení zatím není k dispozici. Spusťte nejprve zpracování.")
-        data = result.read_json(REGIONS_FILE)
-        if data["method"] != "regions":
-            raise ValueError("Projekt nepoužívá rozvržení oblastmi (nastavení metody rozvržení).")
-        return data
+        return result.read_json(REGIONS_FILE)
 
     def _layout_waiting(self, project_id: str) -> dict:
         state = self.store.get(project_id).get("layout")
@@ -692,8 +688,6 @@ class Workflow:
             shutil.rmtree(staging, ignore_errors=True)
         finished, duration = now(), round(time.monotonic() - clock, 3)
         laid_out = definition.id == REGIONS_STEP and state in FINISHED
-        divided = laid_out and read_json(self.store.result_dir(project_id, REGIONS_STEP) / REGIONS_FILE)["method"] \
-            == "regions"
 
         def end(project):
             entry = project["steps"][definition.id]
@@ -704,9 +698,7 @@ class Workflow:
                 entry.update(finished=finished, duration=duration)
             if laid_out:
                 # The first round waits for the person unless the setting approves it; later ones keep the state.
-                if not divided:
-                    project["layout"] = None
-                elif project.get("layout") is None:
+                if project.get("layout") is None:
                     project["layout"] = APPROVED if settings["layout_auto_approve"] else WAITING
         self.store.mutate(project_id, end)
         diagnostics.record(run_id, "step", step=definition.id, started=started, finished=finished,

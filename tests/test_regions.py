@@ -44,7 +44,7 @@ def pdf(tmp_path_factory):
     return printed_pdf(tmp_path_factory.mktemp("regions") / "zpravodaj-2000-05.pdf", [CROSSING])
 
 
-def layout(tmp_path, pdf, *answers, method="regions") -> tuple[dict, ScriptedProvider, dict]:
+def layout(tmp_path, pdf, *answers) -> tuple[dict, ScriptedProvider, dict]:
     """Import, Image preparation and Layout (regions) of the crossing page with scripted AI answers."""
     provider = ScriptedProvider()
     if answers:
@@ -52,9 +52,7 @@ def layout(tmp_path, pdf, *answers, method="regions") -> tuple[dict, ScriptedPro
     shipped = implementations()
     workflow = Workflow(ProjectStore(tmp_path / "library"), language=provider,
                         steps={step: shipped[step] for step in ("import", "prepare", "regions")})
-    project = workflow.create(pdf)
-    workflow.update_settings(project["id"], {"layout_method": method})
-    project = workflow.run(project["id"])
+    project = workflow.run(workflow.create(pdf)["id"])
     return workflow.result(project["id"], "regions").read_json(REGIONS_FILE), provider, project
 
 
@@ -72,7 +70,7 @@ def test_the_ai_regions_become_one_sequence_in_reading_order_snapped_to_the_prin
     result, provider, project = layout(tmp_path, pdf, READING)
 
     [entry] = result["pages"]
-    assert result["method"] == "regions" and entry["source"] == "ai"
+    assert entry["source"] == "ai"
     assert labels(entry) == ["1a", "1b", "2a", "2b"]
     assert [region["continues"] for region in entry["regions"]] == [False, True, False, True]
     assert [region["kind"] for region in entry["regions"]] == ["article"] * 4
@@ -160,13 +158,6 @@ def test_without_ai_every_page_is_one_region(tmp_path, pdf):
     assert entry["source"] == "failed" and entry["reason"].startswith(UNAVAILABLE)
     assert labels(entry) == ["1a"]
     assert states(project)["regions"] == "warning"
-
-
-def test_the_blocks_method_asks_nothing(tmp_path, pdf):
-    result, provider, project = layout(tmp_path, pdf, method="blocks")
-
-    assert result == {"method": "blocks", "pages": []}
-    assert provider.requests == [] and states(project)["regions"] == "done"
 
 
 def states(project) -> dict:

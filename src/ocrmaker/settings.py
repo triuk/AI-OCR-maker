@@ -26,11 +26,7 @@ DEFAULTS = {
     "reconstruction_accept_confidence": 80.0,
     # Web lookup: short web searches settle the spots AI reconstruction left unresolved (off: they stay unresolved).
     "web_lookup": True,
-    # Layout method (ADR 0006): "regions" divides each page into AI layout regions before OCR; "blocks" is the
-    # method of ADR 0005 (blocks from Tesseract's lines, grouped by Reading order). "regions" is the default: the
-    # benchmark (benchmark/JOURNAL.md, 2026-11-11) showed far fewer reading order errors for a slightly lower text accuracy.
-    "layout_method": "regions",
-    # With layout regions a run stops at Layout until the person approves the layout; on, the AI's layout is
+    # A run stops at Layout until the person approves the layout regions; on, the AI's layout is
     # approved at once (batch work, the benchmark).
     "layout_auto_approve": False,
 }
@@ -92,16 +88,7 @@ def _project_dictionary(value):
     return words
 
 
-LAYOUT_METHODS = ("blocks", "regions")
-
-
-def _layout_method(value):
-    if value not in LAYOUT_METHODS:
-        raise ValueError("Neznámá metoda rozvržení.")
-    return value
-
-
-# One validator per setting; later tickets add their settings (thresholds, web lookup) here.
+# One validator per setting.
 VALIDATORS = {
     "language": _language,
     "ai_provider": _ai_provider,
@@ -112,7 +99,6 @@ VALIDATORS = {
     "project_dictionary": _project_dictionary,
     "reconstruction_accept_confidence": _confidence,
     "web_lookup": _switch,
-    "layout_method": _layout_method,
     "layout_auto_approve": _switch,
 }
 assert set(VALIDATORS) == set(DEFAULTS)

@@ -1,7 +1,6 @@
 """Layout (regions): divides every prepared page into AI layout regions in reading order before OCR (ADR 0006).
 
-With the setting `layout_method` "blocks" (the method of ADR 0005) the step only records that and leaves the
-page layout to the Layout (blocks) and Reading order steps. With "regions" the step runs in layout rounds:
+The step runs in layout rounds:
 
 - the first round gives every page one AI request and at most one corrective request (`ocrmaker.regions`),
   checked against a whole-page Tesseract pass that is used only for the check and never kept as text. A page
@@ -13,7 +12,7 @@ page layout to the Layout (blocks) and Reading order steps. With "regions" the s
 - once the person approved the layout (the project's "layout" is "approved"), the run takes every page the person
   changed into the result as drawn, without AI, so the steps after Layout read only this result.
 
-The result (`steps/regions/`) holds `regions.json` {"method", "round": the number of AI rounds so far,
+The result (`steps/regions/`) holds `regions.json` {"round": the number of AI rounds so far,
 "pages": [page entries of `ocrmaker.regions`], "kept": [{"index", "reason"}]: pages this round could not redo}.
 """
 from __future__ import annotations
@@ -38,9 +37,6 @@ class RegionsStep(Step):
     id = REGIONS_STEP
 
     def run(self, ctx: StepContext) -> None:
-        if ctx.settings.get("layout_method", "blocks") != "regions":
-            ctx.output.write_json(REGIONS_FILE, {"method": "blocks", "pages": []})
-            return
         pages = read_pages(ctx.result(PREPARED_STEP))
         previous = self._previous(ctx, len(pages))
         state = ctx.layout_review()
@@ -78,7 +74,7 @@ class RegionsStep(Step):
                 results.append(entry)
                 ctx.output.write_overlay(index, self._overlay(entry))
         ctx.progress(len(pages), len(pages), f"Stránka {len(pages)} z {len(pages)}")
-        ctx.output.write_json(REGIONS_FILE, {"method": "regions", "round": number, "pages": results, "kept": kept})
+        ctx.output.write_json(REGIONS_FILE, {"round": number, "pages": results, "kept": kept})
         if ai.unavailable is not None:
             ctx.warn(f"AI není k dispozici ({ai.unavailable}), "
                      + ("každá stránka je proto jedna oblast." if previous is None
@@ -99,7 +95,7 @@ class RegionsStep(Step):
         if result is None or not result.exists(REGIONS_FILE):
             return None
         data = result.read_json(REGIONS_FILE)
-        return data if data["method"] == "regions" and len(data["pages"]) == count else None
+        return data if len(data["pages"]) == count else None
 
     @staticmethod
     def _checked(recognizer, page: dict, ctx: StepContext) -> tuple[method.Page, object]:
@@ -180,8 +176,6 @@ class RegionsStep(Step):
 
     def report(self, result: StepResult) -> ReportSection | None:
         data = result.read_json(REGIONS_FILE)
-        if data["method"] != "regions":
-            return None
         pages = [{"index": entry["index"], "source": entry["source"], "round": entry.get("round", 1),
                   "regions": len(entry["regions"]),
                   "articles": len({region["article"] for region in entry["regions"]}),

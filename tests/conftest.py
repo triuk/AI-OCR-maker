@@ -18,15 +18,15 @@ from ocrmaker.workflow import Workflow  # noqa: E402
 TOKEN = "test-token"
 
 
-# The suite runs the method of ADR 0005 unless a test switches layout regions on, module-scoped fixtures included.
-REAL_LAYOUT_METHOD = settings.DEFAULTS["layout_method"]
-settings.DEFAULTS["layout_method"] = "blocks"
+# The suite approves the AI's layout at once unless a test asks for layout rounds, module-scoped fixtures included.
+REAL_AUTO_APPROVE = settings.DEFAULTS["layout_auto_approve"]
+settings.DEFAULTS["layout_auto_approve"] = True
 
 
 @pytest.fixture
-def real_layout_method() -> str:
-    """The application's own default layout method, which the rest of the suite overrides."""
-    return REAL_LAYOUT_METHOD
+def real_auto_approve() -> bool:
+    """The application's own default of `layout_auto_approve`, which the rest of the suite overrides."""
+    return REAL_AUTO_APPROVE
 
 
 @pytest.fixture
@@ -49,8 +49,8 @@ def step_implementations():
 def language_provider():
     """The AI stand-in for every provider name; script answers with language_provider.on(purpose, answer).
 
-    Reading order answers by default with Layout's geometric numbering, as one article; the read-through names
-    no word; AI reconstruction confirms every problem spot's own reading and leaves empty word boxes unanswered
+    Layout answers by default with one region over the whole page, Reading order links no article across
+    pages; the read-through names no word; AI reconstruction confirms every problem spot's own reading and leaves empty word boxes unanswered
     (fakes.answer_spots).
     """
     return default_provider()

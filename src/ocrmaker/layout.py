@@ -1,12 +1,13 @@
 """Layout: blocks built from recognised lines and words, the format Layout stores and later steps read.
 
-Every recognised word belongs to exactly one block (ADR 0005). Blocks are built locally from geometry:
-Tesseract's lines are split at wide gaps into line pieces, the rows under a printed rule below a table's column
-headings (`ocrmaker.rules`) and grid-like rows of short pieces become tables,
-the remaining pieces are chained downwards into paragraphs (a short closing line stays with its paragraph
-even when Tesseract measures its letters larger), small stray artefacts (specks without letters or digits)
-join the nearest block, and each block gets a kind from its size and position. Blocks are numbered in a geometric reading order (running headers first, then a recursive cut
-into columns and bands, running footers last); that order is also the fallback reading order.
+Every recognised word belongs to exactly one block. Blocks are built locally from geometry inside each layout
+region (ADR 0006, `build_regions`) from its words alone, with its text upright: Tesseract's lines are split at
+wide gaps into line pieces, the rows under a printed rule below a table's column headings (`ocrmaker.rules`) and
+grid-like rows of short pieces become tables, the remaining pieces are chained downwards into paragraphs (a
+short closing line stays with its paragraph even when Tesseract measures its letters larger), small stray
+artefacts (specks without letters or digits) join the nearest block, and each block gets a kind from its size
+(text sizes measured against the whole page's body text). Inside a region the blocks follow a recursive cut into
+columns and bands; the page's blocks follow the regions' order.
 
 The Layout result (`steps/layout/`) holds `layout.json`:
 
@@ -15,23 +16,19 @@ The Layout result (`steps/layout/`) holds `layout.json`:
 and one page file per page, `pages/page-0001.json`:
 
     {"index": 0,
-     "columns": [[x0, y0, x1, y1], ...],     # column regions, source page coordinates
-     "blocks": [{                            # in geometric order; number = position + 1
+     "columns": [[x0, y0, x1, y1], ...],     # the layout regions' boxes, one per region, source page coordinates
+     "blocks": [{                            # in the regions' order; number = position + 1
         "id": "p1-b1",                       # unique in the project
-        "number": 1,                         # the number shown to the AI and in the step previews
-        "kind": "heading",                   # one of KINDS
+        "number": 1,                         # the number shown in the step previews
+        "kind": "heading",                   # one of KINDS; header and footer are the region's kind
         "bbox": [x0, y0, x1, y1],            # union of its word boxes, source page coordinates
-        "column": 0,                         # index into "columns"
-        "region": "p1-r1",                   # only on a page divided into layout regions: the block's region
+        "column": 0,                         # index into "columns": the block's region
+        "region": "p1-r1",                   # the block's layout region
         "label": true,                       # only when the block opens with a label (a time, an item
                                              # number, a bullet, a key of a key column): a list item or a
                                              # timetable row of its own, never a paragraph's continuation
         "lines": [["p1-w1", "p1-w2"], ...]}]} # word ids: lines top to bottom, words left to right;
                                              # a table's lines are its rows, read across the cells
-
-On a page divided into layout regions (ADR 0006, `build_regions`) the blocks are built inside each region from its
-words alone, in the regions' order; "columns" are the regions' boxes, one per region. Running headers and
-footers are then the kinds of the regions, and a turned region is laid out with its text upright.
 
 Blocks hold word ids only; the words' text and boxes stay in the Local OCR result (`ocrmaker.words`), so
 later reconstructions and corrections apply to them without touching the layout. Geometry is computed on
@@ -64,8 +61,6 @@ CHAIN_GAP = 1.0          # pieces further apart vertically than this start a new
 SIZE_RATIO = 1.2         # pieces whose sizes differ more than this never share a block
 HEADING_SIZE = 1.3       # a block at least this much larger than body text is a heading
 CAPTION_SIZE = 0.85      # a block at most this large is a caption
-EDGE_BAND = 0.1          # running headers and footers lie within this share of the page height
-EDGE_GAP = 1.0           # ...and this many body x-heights away from the rest of the page
 TABLE_WORDS = 4          # a table cell has at most this many words
 TABLE_ROWS = 3           # a table has at least this many rows of at least two aligned cells
 CLOSING_WIDTH = 0.5      # a closing line of a paragraph is at most this share of the line above wide
@@ -539,7 +534,7 @@ def _paragraphs(chain: list[_Piece]) -> list[list[_Piece]]:
     return paragraphs
 
 
-def _kinds(blocks: list[_Block], body: float, page_height: float, running: bool = True) -> None:
+def _kinds(blocks: list[_Block], body: float) -> None:
     for block in blocks:
         if block.kind != "body" or block.size is None:
             continue
@@ -547,33 +542,6 @@ def _kinds(blocks: list[_Block], body: float, page_height: float, running: bool 
             block.kind = "heading"
         elif block.size <= CAPTION_SIZE * body:
             block.kind = "caption"
-    if not running:
-        return
-
-    # Running headers and footers: short, not large, inside the edge band and apart from everything else.
-    def edge_candidate(block: _Block, top: bool) -> bool:
-        if len(block.lines) > 2 or block.kind in ("table", "heading") \
-                or (block.size is not None and block.size > 1.15 * body):
-            return False
-        return block.box[3] <= EDGE_BAND * page_height if top else block.box[1] >= (1 - EDGE_BAND) * page_height
-
-    for top, kind in ((True, "header"), (False, "footer")):
-        edge = [block for block in blocks if edge_candidate(block, top)]
-        while edge:  # drop candidates that are not apart from the rest, until the rest stops growing
-            rest = [block for block in blocks if block not in edge]
-            if not rest:
-                break
-            if top:
-                limit = min(block.box[1] for block in rest)
-                kept = [block for block in edge if block.box[3] + EDGE_GAP * body <= limit]
-            else:
-                limit = max(block.box[3] for block in rest)
-                kept = [block for block in edge if block.box[1] - EDGE_GAP * body >= limit]
-            if len(kept) == len(edge):
-                break
-            edge = kept
-        for block in edge:
-            block.kind = kind
 
 
 def _geometric(blocks: list[_Block], columns: list[list[_Block]]) -> list[_Block]:
@@ -603,20 +571,16 @@ def _body_size(pieces: list[_Piece]) -> float:
     return statistics.median(sized) if sized else X_HEIGHT_SHARE * statistics.median(p.height for p in pieces)
 
 
-def build_page(page: dict, recognised: dict, rules: list[list[float]] = (), *, frame=None, body: float | None = None,
-               running: bool = True) -> dict:
-    """The layout page file for one prepared page, its recognised lines and its printed rules (source page
-    coordinates, `ocrmaker.rules`); see the module docstring.
-
-    For the words of one layout region (`build_regions`): `frame` is (matrix, width, height), the matrix mapping
-    source page coordinates to the frame where the region's text is upright and that frame's size, `body` the
-    page's body text size, and `running` False leaves running headers and footers to the region's kind."""
-    matrix, width, height = frame or (display_matrix(page), *display_size(page))
+def _build_region(page: dict, recognised: dict, rules: list[list[float]], frame, body: float | None) -> dict:
+    """The blocks of one layout region's words (`recognised` holds only its lines) and the printed rules inside it
+    (source page coordinates, `ocrmaker.rules`), as a layout page file. `frame` is (matrix, width, height): the
+    matrix mapping source page coordinates to the frame where the region's text is upright, and that frame's
+    size; `body` is the page's body text size."""
+    matrix, width, _ = frame
     number = page["index"] + 1
     pieces = _pieces(recognised["lines"], matrix)
     if not pieces:
         return {"index": page["index"], "columns": [], "blocks": []}
-    body = body if body is not None else _body_size(pieces)
     texts = {word["id"]: word["text"] for line in recognised["lines"] for word in line["words"]}
     blocks = _ruled_tables(pieces, [apply_rect(matrix, rule) for rule in rules], body)
     blocks += _tables(pieces, body, width)
@@ -624,16 +588,12 @@ def build_page(page: dict, recognised: dict, rules: list[list[float]] = (), *, f
     for chain in _chains(pieces):
         blocks.extend(_Block(paragraph) for paragraph in _paragraphs(chain))
     blocks = _attach_strays(blocks, texts, body)
-    _kinds(blocks, body, height, running)
-
-    edges = {kind: sorted((block for block in blocks if block.kind == kind),
-                          key=lambda block: (block.box[1], block.box[0])) for kind in ("header", "footer")}
-    middle = [block for block in blocks if block.kind not in ("header", "footer")]
+    _kinds(blocks, body)
     column_groups: list[list[_Block]] = []
-    ordered = edges["header"] + _geometric(middle, column_groups) + edges["footer"]
+    ordered = _geometric(blocks, column_groups)
 
-    # A block's column is the narrowest column region holding it; blocks outside every column (headers,
-    # footers, spanning headings) get a region of their own band.
+    # A block's column is the narrowest column region holding it; blocks outside every column (spanning
+    # headings) get a region of their own band.
     regions: list[list[float]] = []
     for group in column_groups:
         region = union(block.box for block in group)
@@ -666,7 +626,7 @@ def _round(box) -> list[float]:
 
 
 def build_regions(page: dict, recognised: dict, rules: list[list[float]], layout_regions: list[dict]) -> dict:
-    """The layout page file of a page divided into layout regions (ADR 0006): the blocks of each region built
+    """The layout page file of a page: the blocks of each region built
     from its words alone (the lines naming it, `ocrmaker.words`), in the regions' order and numbered on the page.
     Each region is a column of its own; a block names its region. Text sizes are measured against the whole
     page's body text, and a running header or footer is a region's kind, not a block's position."""
@@ -687,8 +647,7 @@ def build_regions(page: dict, recognised: dict, rules: list[list[float]], layout
     for column, (region, frame) in enumerate(zip(layout_regions, frames)):
         inside = [rule for rule in rules if _overlap(rule[0], rule[2], region["bbox"][0], region["bbox"][2]) > 0
                   and region["bbox"][1] <= rule[1] <= region["bbox"][3]]
-        built = build_page(page, {"index": page["index"], "lines": lines_of[region["id"]]}, inside, frame=frame,
-                           body=body, running=False)
+        built = _build_region(page, {"index": page["index"], "lines": lines_of[region["id"]]}, inside, frame, body)
         for block in built["blocks"]:
             kind = region["kind"] if region["kind"] in ("header", "footer") else block["kind"]
             blocks.append({**block, "kind": kind, "column": column, "region": region["id"]})

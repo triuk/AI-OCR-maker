@@ -13,16 +13,16 @@ The benchmark directory (default `<data dir>/benchmark`, apart from the user's o
 Reference corrections, the findings about the reference itself, live in the repository:
 `benchmark/corrections/<name>.json`, a list in the format of evaluation.read_reference.
 
-A base is a project of one document with only the local steps (local_steps) run. It is kept per document
+A base is a project of one document with only the local steps (LOCAL_STEPS) run. It is kept per document
 source, version of the local steps' code and local settings, and every trial starts from a copy of it, so the
-local steps run once per change of their code and not once per configuration. With layout regions
-(`layout_method` "regions") the AI decides the layout before OCR, so the base ends with Image preparation and
-each trial runs Layout, Local OCR and Blocks itself; its layout is approved as it comes (`layout_auto_approve`).
+local steps run once per change of their code and not once per configuration. The AI decides the layout before
+OCR, so the base ends with Image preparation and each trial runs Layout, Local OCR and Blocks itself; its layout
+is approved as it comes (`layout_auto_approve`).
 
     {"trial": 1, "id", "created", "label", "document", "commit", "code" (code version of the base's steps),
      "settings": the full project settings, "base": base project id, "project": trial project id,
      "failed": {"step", "message"} of the step that stopped the run, or null,
-     "steps": [{"id", "state", "duration", "shared" (from the base: one of local_steps(settings))}],
+     "steps": [{"id", "state", "duration", "shared" (from the base: one of LOCAL_STEPS)}],
      "ai": the run report's AI totals, "review": the review queue counts (null without an export),
      "corrections": digest of the reference corrections scored with,
      "totals", "pages", "findings": the score (evaluation.compare)}
@@ -48,20 +48,14 @@ from .store import ProjectStore, now
 from .workflow import FINISHED, FIRST_MANUAL, Workflow
 
 TRIAL_VERSION = 1
-LOCAL_STEPS = ("import", "prepare", "regions", "ocr", "layout")
-# With layout regions everything from Layout on depends on the AI's answer.
-LOCAL_STEPS_REGIONS = ("import", "prepare")
+# The steps whose result no AI configuration changes: everything from Layout on depends on the AI's answer.
+LOCAL_STEPS = ("import", "prepare")
 AUTOMATIC_STEPS = STEP_IDS[:FIRST_MANUAL]
-# The settings that decide a base: what its steps read, and which steps it has.
-LOCAL_SETTINGS = ("language", "layout_method")
+# The settings that decide a base: what its steps read.
+LOCAL_SETTINGS = ("language",)
 PACKAGE = Path(__file__).resolve().parent
 REPOSITORY = PACKAGE.parents[1]
 CORRECTIONS = REPOSITORY / "benchmark" / "corrections"
-
-
-def local_steps(settings: dict) -> tuple[str, ...]:
-    """The steps a base runs for these settings: those whose result no AI configuration changes."""
-    return LOCAL_STEPS_REGIONS if settings["layout_method"] == "regions" else LOCAL_STEPS
 
 
 def code_version(steps: tuple[str, ...]) -> str:
@@ -165,7 +159,7 @@ class Benchmark:
     def _trial(self, name: str, changes: dict, label: str | None) -> dict:
         # A trial measures the automatic result: the AI's layout regions are approved as they come (no person).
         settings = project_settings.merged({}, changes | {"layout_auto_approve": True})
-        shared = local_steps(settings)
+        shared = LOCAL_STEPS
         # The code the trial runs is the one checked out when it starts; a commit made meanwhile is not.
         code, revision = code_version(shared), commit()
         base = self._base(name, settings, code, shared)

@@ -29,7 +29,7 @@ class AskingStep(Step):
         image = ctx.output.path("preview.png")
         image.write_bytes(b"\x89PNG fake preview")
         answer = ctx.language.ask("Order the numbered blocks.", {"page": 0, "blocks": [1, 2]}, schema=SCHEMA,
-                                  images=[image], web_search=self.web_search, purpose="reading_order")
+                                  images=[image], web_search=self.web_search, purpose="example")
         ctx.output.write_json("result.json", {"order": answer.data["order"], "provider": answer.provider,
                                               "model": answer.model})
 
@@ -54,12 +54,12 @@ def test_a_new_project_asks_claude_with_its_default_model(workflow, project):
 
 
 def test_a_step_gets_the_parsed_answer_and_the_request_is_recorded(workflow, project, language_provider):
-    language_provider.on("reading_order", {"order": [2, 1]})
+    language_provider.on("example", {"order": [2, 1]})
     workflow.run(project["id"])
     assert workflow.result(project["id"], "order").read_json("result.json") == {
         "order": [2, 1], "provider": "claude", "model": "scripted-model"}
     record, = ai_records(workflow, project["id"])
-    assert record["step"] == "order" and record["purpose"] == "reading_order"
+    assert record["step"] == "order" and record["purpose"] == "example"
     assert record["provider"] == "claude" and record["model"] == "scripted-model"
     assert record["instructions"] == "Order the numbered blocks."
     assert '"blocks":[1,2]' in record["prompt"]
@@ -68,12 +68,12 @@ def test_a_step_gets_the_parsed_answer_and_the_request_is_recorded(workflow, pro
     assert record["usage"] == {"input": 1200, "cached_input": 1000, "output": 80, "reasoning": None, "total": 1280,
                                "uncached_input": 200}
     assert record["images"][0]["bytes"] == len(b"\x89PNG fake preview")
-    assert language_provider.requests_for("reading_order")[0].images == [b"\x89PNG fake preview"]
+    assert language_provider.requests_for("example")[0].images == [b"\x89PNG fake preview"]
 
 
 @pytest.mark.parametrize("language_provider", [ScriptedProvider(usage=None)])
 def test_unknown_usage_is_recorded_as_unknown_never_as_zero(workflow, project, language_provider):
-    language_provider.on("reading_order", {"order": []})
+    language_provider.on("example", {"order": []})
     workflow.run(project["id"])
     record, = ai_records(workflow, project["id"])
     assert record["usage"] is None
@@ -83,7 +83,7 @@ def test_the_project_choice_of_provider_and_model_reaches_the_request(workflow, 
                                                                       monkeypatch, tmp_path):
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "no-codex-cache"))
     workflow.update_settings(project["id"], {"ai_provider": "codex", "ai_model": "gpt-6-astra"})
-    language_provider.on("reading_order", {"order": [1, 2]})
+    language_provider.on("example", {"order": [1, 2]})
     workflow.run(project["id"])
     record, = ai_records(workflow, project["id"])
     assert (record["provider"], record["model"]) == ("codex", "gpt-6-astra")
@@ -93,7 +93,7 @@ def test_the_project_choice_of_provider_and_model_reaches_the_request(workflow, 
 def test_the_project_reasoning_effort_reaches_the_request(workflow, project, language_provider):
     assert project["settings"]["ai_effort"] == "medium"
     workflow.update_settings(project["id"], {"ai_effort": "high"})
-    language_provider.on("reading_order", {"order": [1, 2]})
+    language_provider.on("example", {"order": [1, 2]})
     workflow.run(project["id"])
     record, = ai_records(workflow, project["id"])
     assert record["effort"] == "high"
@@ -107,7 +107,7 @@ def test_settings_refuse_an_unknown_reasoning_effort(workflow, project):
 
 def test_a_failed_request_fails_the_step_with_its_czech_message_and_is_recorded(workflow, project,
                                                                                  language_provider):
-    language_provider.on("reading_order", LanguageError("Limit předplatného Claude je vyčerpaný. Zkuste to později.",
+    language_provider.on("example", LanguageError("Limit předplatného Claude je vyčerpaný. Zkuste to později.",
                                                         code=USAGE_LIMIT, usage={"input": 5, "cached_input": 0,
                                                                                  "output": 0}))
     workflow.run(project["id"])
@@ -120,7 +120,7 @@ def test_a_failed_request_fails_the_step_with_its_czech_message_and_is_recorded(
 
 
 def test_an_answer_that_is_not_json_is_an_invalid_output(workflow, project, language_provider):
-    language_provider.on("reading_order", "Sorry, I cannot see the page.")
+    language_provider.on("example", "Sorry, I cannot see the page.")
     workflow.run(project["id"])
     record, = ai_records(workflow, project["id"])
     assert record["error_code"] == INVALID_OUTPUT

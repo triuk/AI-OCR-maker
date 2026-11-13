@@ -108,13 +108,13 @@ class AskingStep(Step):
     id = "order"
 
     def run(self, ctx):
-        answers = [ctx.language.ask("Order the blocks.", {"page": page}, purpose="reading_order").data
+        answers = [ctx.language.ask("Order the blocks.", {"page": page}, purpose="example").data
                    for page in (0, 1)]
         ctx.output.write_json("result.json", {"answers": answers})
 
 
 def run_asking(library, source_pdf, provider) -> tuple[Workflow, dict]:
-    provider.on("reading_order", {"order": [1, 2]})
+    provider.on("example", {"order": [1, 2]})
     workflow = Workflow(ProjectStore(library), steps={"order": AskingStep()}, language=provider)
     return workflow, workflow.run(workflow.create(source_pdf)["id"])
 
@@ -125,7 +125,7 @@ def test_the_report_lists_the_ai_requests_with_provider_model_and_usage(library,
     ai = workflow.report(project["id"])["ai"]
 
     assert [(r["step"], r["purpose"], r["provider"], r["model"], r["outcome"]) for r in ai["requests"]] == [
-        ("order", "reading_order", "claude", "scripted-model", "ok")] * 2
+        ("order", "example", "claude", "scripted-model", "ok")] * 2
     assert ai["requests"][0]["usage"]["input"] == 1200
     totals = ai["totals"]
     assert (totals["requests"], totals["failed"], totals["unknown_usage"]) == (2, 0, 0)
