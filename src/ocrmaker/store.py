@@ -32,8 +32,6 @@ PROJECT_FILE = "project.json"
 SOURCE_FILE = "source.pdf"
 WORKING_FILE = "working.pdf"
 LAYOUT_FILE = "layout.json"
-# Manual correction kinds older versions stored; dropped when the corrections are read (ocrmaker.corrections).
-RETIRED_CORRECTIONS = ("order",)
 
 
 def now() -> str:
@@ -144,15 +142,7 @@ class ProjectStore:
     def get(self, project_id: str) -> dict:
         path = self.directory(project_id) / PROJECT_FILE
         try:
-            project = read_json(path)
-            # Older projects predate Layout regions and already use the blocks pipeline.
-            if "regions" not in project["steps"]:
-                project["steps"]["regions"] = {
-                    "state": "done", "message": None, "started": None, "finished": None,
-                    "duration": None, "run_id": None, "progress": None, "action": None,
-                }
-                project.setdefault("settings", {}).setdefault("layout_method", "blocks")
-            return project
+            return read_json(path)
         except FileNotFoundError:
             raise KeyError("Projekt neexistuje.") from None
 
@@ -252,10 +242,9 @@ class ProjectStore:
     # Manual corrections ------------------------------------------------------------------------------
 
     def corrections(self, project_id: str) -> list:
-        """The stored manual corrections, without the kinds no longer in use (RETIRED_CORRECTIONS)."""
+        """The stored manual corrections."""
         path = self.directory(project_id) / "corrections.json"
-        stored = read_json(path) if path.is_file() else []
-        return [item for item in stored if item.get("kind") not in RETIRED_CORRECTIONS]
+        return read_json(path) if path.is_file() else []
 
     def write_corrections(self, project_id: str, corrections: list) -> None:
         write_json_atomic(self.directory(project_id) / "corrections.json", corrections)

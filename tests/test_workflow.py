@@ -370,22 +370,3 @@ def test_a_running_step_shows_roughly_how_long_is_left(make_workflow, source_pdf
     assert (progress["done"], progress["total"]) == (1, 4)
     assert 0.8 <= progress["remaining"] <= 1.5  # three more pages at about 0.3 s each
     assert "zbývá" in client.get("/app.js").text
-
-
-def test_legacy_project_without_regions_can_run_review_and_export(make_workflow, source_pdf):
-    workflow = make_workflow(RecordingStep("import"), RecordingStep("regions"),
-                             RecordingStep("review"), RecordingStep("export"))
-    project = workflow.create(source_pdf)
-    def legacy(doc):
-        del doc["steps"]["regions"]
-        del doc["settings"]["layout_method"]
-
-    workflow.store.mutate(project["id"], legacy)
-
-    loaded = workflow.store.get(project["id"])
-    assert loaded["steps"]["regions"]["state"] == "done"
-    assert loaded["settings"]["layout_method"] == "blocks"
-    assert states(workflow.run(project["id"]))["import"] == "done"
-    assert states(workflow.export(project["id"]))["export"] == "done"
-    # A subsequent write persists the normalized state.
-    assert workflow.store.get(project["id"])["steps"]["regions"]["state"] == "done"
