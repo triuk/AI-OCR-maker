@@ -54,8 +54,10 @@ Tools and score columns: `benchmark/README.md`. Memory between rounds: `benchmar
    deciding. Kept → commit message carries the before/after numbers, `git merge --ff-only` into `main`,
    delete the branch; the new trials become the baseline. Not kept → leave the branch unmerged, back to `main`.
 
-7. **Journal.** Add the round at the top of the rounds in `benchmark/JOURNAL.md` (format there) and update the
-   baselines and open ideas; commit it on `main`. Done when the next round could start from the journal alone.
+7. **Journal.** Add the round at the top of the rounds in `benchmark/JOURNAL.md` (format there, short: the
+   details go into the commit message) and update the baselines and open ideas: remove ideas that are done or
+   disproved, and shorten the rounds the new one supersedes. Commit it on `main`. Done when the next round
+   could start from the journal alone.
 
 8. **Report** to the user in Czech, in a few lines: what was tried, the numbers, kept or not, the next idea,
    and the yes/no question if step 3 raised one.
